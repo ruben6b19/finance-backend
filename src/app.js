@@ -10,17 +10,17 @@ const __dirname = path.dirname(__filename);
 
 const app = express()
 
-const isBundled = !import.meta.url.includes('file://');
+// const isBundled = !import.meta.url.includes('file://');
 
-const baseDir = isBundled 
-    ? path.dirname(process.execPath) 
-    : process.cwd();
+// const baseDir = isBundled 
+//     ? path.dirname(process.execPath) 
+//     : process.cwd();
 
-export const UPLOADS_PATH = path.join(baseDir, 'src', 'public', 'uploads');
+// export const UPLOADS_PATH = path.join(baseDir, 'src', 'public', 'uploads');
 
-if (!fs.existsSync(UPLOADS_PATH)) {
-    fs.mkdirSync(UPLOADS_PATH, { recursive: true });
-}
+// if (!fs.existsSync(UPLOADS_PATH)) {
+//     fs.mkdirSync(UPLOADS_PATH, { recursive: true });
+// }
 
 // app.use(cors({
 //     origin: '*', 
@@ -48,8 +48,8 @@ app.use('/api', express.urlencoded({extended: true, limit: "16kb"}));
 
 app.use(cookieParser())
 
-app.use('/uploads', express.static(UPLOADS_PATH));
-app.use(express.static("public"))
+//app.use('/uploads', express.static(UPLOADS_PATH));
+//app.use(express.static("public"))
 
 // Importación de rutas de la API
 import userRouter from './modules/users/user.routes.js'

@@ -15,27 +15,13 @@ import {
     updateUser,
     deleteUser
 } from "./user.controller.js";
-import {upload} from "../../middlewares/multer.middleware.js"
+//import {upload} from "../../middlewares/multer.middleware.js"
 import { verifyFirebaseToken, verifyJWT } from "../../middlewares/auth.middleware.js";
 import { get } from "mongoose";
 
 
 const router = Router()
 
-//todo ver como funciona esto luego borrar la parte que carga la imagen
-router.route("/register2").post(
-    upload.fields([
-        {
-            name: "avatar",
-            maxCount: 1
-        }, 
-        {
-            name: "coverImage",
-            maxCount: 1
-        }
-    ]),
-    registerUser
-    )
 router.route("/").post(verifyFirebaseToken, registerUser)
 
 router.route("/login").post(loginUser)
