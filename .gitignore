@@ -1,0 +1,9 @@
+cat <<EOT > .gitignore
+node_modules/
+.env
+dist/
+build/
+.idea/
+.opencode/
+EOT
+src/serviceAccountKey.json

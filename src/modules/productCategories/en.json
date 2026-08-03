@@ -1,0 +1,15 @@
+{
+    "error_productCategory_name_required": "Category name is required.",
+    "error_productCategory_invalid_id": "Provided category ID is invalid.",
+    "error_productCategory_not_found": "Product category not found.",
+    "error_productCategory_no_fields_update": "At least one valid field must be provided to update.",
+    "error_productCategory_duplicate_name": "A category with this name already exists.",
+
+    "success_productCategory_created": "Product category created successfully.",
+    "success_productCategory_updated": "Product category updated successfully.",
+    "success_productCategory_deleted": "Product category deleted successfully.",
+    "success_productCategories_fetched": "Product categories fetched successfully.",
+    "success_productCategory_fetched": "Product category fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

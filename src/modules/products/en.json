@@ -1,0 +1,16 @@
+{
+    "error_product_name_required": "Product name is required.",
+    "error_product_invalid_price": "Product price must be a non-negative number.",
+    "error_product_invalid_id": "Provided product ID is invalid.",
+    "error_product_not_found": "Product not found.",
+    "error_product_no_fields_update": "At least one valid field must be provided to update.",
+    "error_product_duplicate_sku": "A product with this SKU already exists.",
+
+    "success_product_created": "Product created successfully.",
+    "success_product_updated": "Product updated successfully.",
+    "success_product_deleted": "Product deleted successfully.",
+    "success_products_fetched": "Products fetched successfully.",
+    "success_product_fetched": "Product fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

@@ -1,0 +1,12 @@
+cat <<EOT > .opencodeignore
+node_modules/
+dist/
+build/
+.idea/
+.git/
+.opencode/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+*.log
+EOT

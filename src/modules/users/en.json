@@ -1,0 +1,23 @@
+{
+    "error_user_required_fields": "Full name, email, password, role, and institute are all required fields.",
+    "error_user_invalid_role": "The role must be a non-empty array of valid roles.",
+    "error_user_auth_required": "Authentication is required to perform this action. The creating/updating user was not identified.",
+    "error_user_id_required": "The User ID is required for this operation.",
+    "error_user_no_fields_update": "At least one valid field (full name, email, role, status, or password) must be provided for update.",
+    "error_user_not_found": "User not found.",
+    "error_user_token_missing": "The authentication token (ID Token) is missing.",
+    "error_user_creation_failed_db": "Something went wrong while trying to save the user in the database. The Firebase account was deleted.",
+    "error_user_cannot_delete_is_teaching": "Cannot delete user: This user is currently assigned as a teacher to one or more active courses.",
+    "error_user_cannot_delete_is_enrolled": "Cannot delete user: This user is currently enrolled in one or more active courses.",
+
+    "validation_error_unique_email": "A user with this email address already exists.",
+    "validation_error_invalid_institute_id": "The provided Institute ID is invalid for searching or creation.",
+
+    "success_user_registered": "User registered successfully.",
+    "success_user_updated": "User updated successfully.",
+    "success_user_deleted": "User deleted successfully.",
+    "success_users_fetched": "Users successfully fetched for the institute.",
+    "success_user_claims_updated": "Role claims and MongoDB ID updated in the Firebase token. Please refresh the token on the client.",
+
+    "error_internal_server_generic": "An unexpected server error occurred."
+}

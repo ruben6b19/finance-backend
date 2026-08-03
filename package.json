@@ -1,0 +1,44 @@
+{
+  "name": "finance-backend",
+  "version": "1.0.0",
+  "description": "a backend for the finance project",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js",
+    "start": "node src/index.js"
+  },
+  "keywords": [
+    "javascript",
+    "backend",
+    "finance"
+  ],
+  "author": "Ruben Huanca",
+  "license": "ISC",
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "prettier": "^3.9.5"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.28.0",
+    "@tiptap/pm": "^3.28.0",
+    "axios": "^1.18.1",
+    "bcrypt": "^6.0.0",
+    "cloudinary": "^2.10.0",
+    "connect-mongo": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-formidable": "^1.2.0",
+    "express-session": "^1.19.0",
+    "firebase-admin": "^14.2.0",
+    "imapflow": "^1.4.7",
+    "jsonwebtoken": "^9.0.3",
+    "mailparser": "^3.9.14",
+    "mongoose": "^9.7.4",
+    "mongoose-aggregate-paginate-v2": "^1.1.4",
+    "mongoose-paginate-v2": "^1.9.5",
+    "multer": "^2.2.0"
+  }
+}

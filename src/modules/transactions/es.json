@@ -1,0 +1,20 @@
+{
+    "error_transaction_required_fields": "Tipo, monto, concepto y categoría son campos obligatorios.",
+    "error_transaction_invalid_type": "El tipo de transacción debe ser 0 (Ingreso) o 1 (Gasto).",
+    "error_transaction_invalid_amount": "El monto debe ser un número mayor a cero.",
+    "error_transaction_invalid_payment_method": "El método de pago no es válido. Debe ser 0 (Efectivo), 1 (Transferencia), 2 (Tarjeta) o 3 (Otro).",
+    "error_transaction_not_found": "Transacción no encontrada.",
+    "error_transaction_id_required": "El ID de la transacción es obligatorio.",
+    "error_transaction_invalid_id": "El ID de transacción proporcionado no es válido.",
+    "error_transaction_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_transaction_auth_required": "Se requiere autenticación para realizar esta acción.",
+
+    "success_transaction_created": "Transacción creada exitosamente.",
+    "success_transaction_updated": "Transacción actualizada exitosamente.",
+    "success_transaction_deleted": "Transacción eliminada exitosamente.",
+    "success_transactions_fetched": "Transacciones obtenidas exitosamente.",
+    "success_transaction_fetched": "Transacción obtenida exitosamente.",
+    "success_transaction_summary_fetched": "Resumen de transacciones obtenido exitosamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

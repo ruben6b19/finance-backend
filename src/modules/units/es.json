@@ -1,0 +1,16 @@
+{
+    "error_unit_name_required": "El nombre de la unidad es obligatorio.",
+    "error_unit_symbol_required": "El símbolo de la unidad es obligatorio.",
+    "error_unit_invalid_id": "El ID de la unidad proporcionado no es válido.",
+    "error_unit_not_found": "Unidad no encontrada.",
+    "error_unit_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_unit_duplicate_name": "Ya existe una unidad con este nombre.",
+
+    "success_unit_created": "Unidad creada exitosamente.",
+    "success_unit_updated": "Unidad actualizada exitosamente.",
+    "success_unit_deleted": "Unidad eliminada exitosamente.",
+    "success_units_fetched": "Unidades obtenidas exitosamente.",
+    "success_unit_fetched": "Unidad obtenida exitosamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

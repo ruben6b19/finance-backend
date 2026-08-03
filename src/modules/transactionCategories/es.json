@@ -1,0 +1,16 @@
+{
+    "error_transactionCategory_name_required": "El nombre de la categoría es obligatorio.",
+    "error_transactionCategory_invalid_type": "El tipo de categoría debe ser 0 (Ingreso) o 1 (Gasto).",
+    "error_transactionCategory_invalid_id": "El ID de la categoría proporcionado no es válido.",
+    "error_transactionCategory_not_found": "Categoría de transacción no encontrada.",
+    "error_transactionCategory_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_transactionCategory_duplicate_name": "Ya existe una categoría con este nombre.",
+
+    "success_transactionCategory_created": "Categoría de transacción creada exitosamente.",
+    "success_transactionCategory_updated": "Categoría de transacción actualizada exitosamente.",
+    "success_transactionCategory_deleted": "Categoría de transacción eliminada exitosamente.",
+    "success_transactionCategories_fetched": "Categorías de transacción obtenidas exitosamente.",
+    "success_transactionCategory_fetched": "Categoría de transacción obtenida exitosamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

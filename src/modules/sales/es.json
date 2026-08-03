@@ -1,0 +1,25 @@
+{
+    "error_sale_required_fields": "El monto total de la venta y al menos un producto o concepto son requeridos.",
+    "error_sale_invalid_amount": "El monto total de la venta debe ser mayor a cero.",
+    "error_sale_invalid_payment_method": "El método de pago no es válido. Debe ser 0 (Efectivo), 1 (Transferencia), 2 (Tarjeta) o 3 (Otro).",
+    "error_sale_invalid_payment_status": "El estado de pago no es válido. Debe ser 0 (Pendiente), 1 (Pagado) o 2 (Cancelado).",
+    "error_sale_invalid_status": "El estado de la venta no es válido. Debe ser 0 (Completado), 1 (Pendiente) o 2 (Cancelado).",
+    "error_sale_not_found": "Venta no encontrada.",
+    "error_sale_id_required": "El ID de la venta es obligatorio.",
+    "error_sale_invalid_id": "El ID de la venta proporcionado no es válido.",
+    "error_sale_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_sale_auth_required": "Se requiere autenticación para realizar esta acción.",
+    "error_sale_items_required": "Debe incluir al menos un producto o ítem en la venta.",
+    "error_sale_invalid_transaction_category": "La categoría de transacción proporcionada no es válida.",
+    "error_sale_already_cancelled": "Esta venta ya se encuentra anulada.",
+
+    "success_sale_created": "Venta creada exitosamente.",
+    "success_sale_updated": "Venta actualizada exitosamente.",
+    "success_sale_deleted": "Venta eliminada exitosamente.",
+    "success_sales_fetched": "Ventas obtenidas exitosamente.",
+    "success_sale_fetched": "Venta obtenida exitosamente.",
+    "success_sale_summary_fetched": "Resumen de ventas obtenido exitosamente.",
+    "success_sale_cancelled": "Venta anulada correctamente. El stock y la caja fueron actualizados.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

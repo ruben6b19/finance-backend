@@ -1,0 +1,18 @@
+{
+    "error_purchase_required_fields": "Total amount is required.",
+    "error_purchase_invalid_amount": "Total amount must be a positive number.",
+    "error_purchase_items_required": "Purchase must contain at least one item.",
+    "error_purchase_invalid_payment_method": "Provided payment method is invalid.",
+    "error_purchase_invalid_payment_status": "Provided payment status is invalid.",
+    "error_purchase_invalid_status": "Provided purchase status is invalid.",
+    "error_purchase_invalid_id": "Provided purchase ID is invalid.",
+    "error_purchase_not_found": "Purchase not found.",
+    "error_purchase_no_fields_update": "At least one valid field must be provided to update.",
+    "success_purchase_created": "Purchase created successfully.",
+    "success_purchase_updated": "Purchase updated successfully.",
+    "success_purchase_deleted": "Purchase deleted successfully.",
+    "success_purchases_fetched": "Purchases fetched successfully.",
+    "success_purchase_fetched": "Purchase fetched successfully.",
+    "success_purchase_summary_fetched": "Purchase summary fetched successfully.",
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

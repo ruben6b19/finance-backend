@@ -1,0 +1,16 @@
+{
+    "error_unit_name_required": "Unit name is required.",
+    "error_unit_symbol_required": "Unit symbol is required.",
+    "error_unit_invalid_id": "Provided unit ID is invalid.",
+    "error_unit_not_found": "Unit not found.",
+    "error_unit_no_fields_update": "At least one valid field must be provided to update.",
+    "error_unit_duplicate_name": "A unit with this name already exists.",
+
+    "success_unit_created": "Unit created successfully.",
+    "success_unit_updated": "Unit updated successfully.",
+    "success_unit_deleted": "Unit deleted successfully.",
+    "success_units_fetched": "Units fetched successfully.",
+    "success_unit_fetched": "Unit fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

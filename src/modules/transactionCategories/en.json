@@ -1,0 +1,16 @@
+{
+    "error_transactionCategory_name_required": "Category name is required.",
+    "error_transactionCategory_invalid_type": "Category type must be 0 (Income) or 1 (Expense).",
+    "error_transactionCategory_invalid_id": "Provided category ID is invalid.",
+    "error_transactionCategory_not_found": "Transaction category not found.",
+    "error_transactionCategory_no_fields_update": "At least one valid field must be provided to update.",
+    "error_transactionCategory_duplicate_name": "A category with this name already exists.",
+
+    "success_transactionCategory_created": "Transaction category created successfully.",
+    "success_transactionCategory_updated": "Transaction category updated successfully.",
+    "success_transactionCategory_deleted": "Transaction category deleted successfully.",
+    "success_transactionCategories_fetched": "Transaction categories fetched successfully.",
+    "success_transactionCategory_fetched": "Transaction category fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

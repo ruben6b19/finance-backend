@@ -1,0 +1,16 @@
+{
+    "error_product_name_required": "El nombre del producto es obligatorio.",
+    "error_product_invalid_price": "El precio del producto debe ser un número no negativo.",
+    "error_product_invalid_id": "El ID del producto proporcionado no es válido.",
+    "error_product_not_found": "Producto no encontrado.",
+    "error_product_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_product_duplicate_sku": "Ya existe un producto con este SKU.",
+
+    "success_product_created": "Producto creado exitosamente.",
+    "success_product_updated": "Producto actualizado exitosamente.",
+    "success_product_deleted": "Producto eliminado exitosamente.",
+    "success_products_fetched": "Productos obtenidos exitosamente.",
+    "success_product_fetched": "Producto obtenido exitosamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

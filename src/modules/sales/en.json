@@ -1,0 +1,25 @@
+{
+    "error_sale_required_fields": "Total sale amount and at least one item or concept are required.",
+    "error_sale_invalid_amount": "Total sale amount must be greater than zero.",
+    "error_sale_invalid_payment_method": "Payment method is invalid. Must be 0 (Cash), 1 (Transfer), 2 (Card), or 3 (Other).",
+    "error_sale_invalid_payment_status": "Payment status is invalid. Must be 0 (Pending), 1 (Paid), or 2 (Cancelled).",
+    "error_sale_invalid_status": "Sale status is invalid. Must be 0 (Completed), 1 (Pending), or 2 (Cancelled).",
+    "error_sale_not_found": "Sale not found.",
+    "error_sale_id_required": "Sale ID is required.",
+    "error_sale_invalid_id": "Provided sale ID is invalid.",
+    "error_sale_no_fields_update": "At least one valid field must be provided to update.",
+    "error_sale_auth_required": "Authentication is required to perform this action.",
+    "error_sale_items_required": "At least one item or product must be included in the sale.",
+    "error_sale_invalid_transaction_category": "The provided transaction category is not valid.",
+    "error_sale_already_cancelled": "This sale has already been cancelled.",
+
+    "success_sale_created": "Sale created successfully.",
+    "success_sale_updated": "Sale updated successfully.",
+    "success_sale_deleted": "Sale deleted successfully.",
+    "success_sales_fetched": "Sales fetched successfully.",
+    "success_sale_fetched": "Sale fetched successfully.",
+    "success_sale_summary_fetched": "Sale summary fetched successfully.",
+    "success_sale_cancelled": "Sale cancelled successfully. Stock and cash have been updated.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

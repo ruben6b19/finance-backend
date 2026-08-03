@@ -1,0 +1,15 @@
+{
+    "error_productCategory_name_required": "El nombre de la categoría es obligatorio.",
+    "error_productCategory_invalid_id": "El ID de la categoría proporcionado no es válido.",
+    "error_productCategory_not_found": "Categoría de producto no encontrada.",
+    "error_productCategory_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_productCategory_duplicate_name": "Ya existe una categoría con este nombre.",
+
+    "success_productCategory_created": "Categoría de producto creada exitosamente.",
+    "success_productCategory_updated": "Categoría de producto actualizada exitosamente.",
+    "success_productCategory_deleted": "Categoría de producto eliminada exitosamente.",
+    "success_productCategories_fetched": "Categorías de producto obtenidas exitosamente.",
+    "success_productCategory_fetched": "Categoría de producto obtenida exitosamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

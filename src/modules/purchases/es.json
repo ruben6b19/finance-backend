@@ -1,0 +1,18 @@
+{
+    "error_purchase_required_fields": "El monto total es obligatorio.",
+    "error_purchase_invalid_amount": "El monto total debe ser un número positivo.",
+    "error_purchase_items_required": "La compra debe contener al menos un producto.",
+    "error_purchase_invalid_payment_method": "El método de pago proporcionado no es válido.",
+    "error_purchase_invalid_payment_status": "El estado de pago proporcionado no es válido.",
+    "error_purchase_invalid_status": "El estado de compra proporcionado no es válido.",
+    "error_purchase_invalid_id": "El ID de la compra proporcionado no es válido.",
+    "error_purchase_not_found": "Compra no encontrada.",
+    "error_purchase_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "success_purchase_created": "Compra creada exitosamente.",
+    "success_purchase_updated": "Compra actualizada exitosamente.",
+    "success_purchase_deleted": "Compra eliminada exitosamente.",
+    "success_purchases_fetched": "Compras obtenidas exitosamente.",
+    "success_purchase_fetched": "Compra obtenida exitosamente.",
+    "success_purchase_summary_fetched": "Resumen de compras obtenido exitosamente.",
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

@@ -1,0 +1,20 @@
+{
+    "error_transaction_required_fields": "Type, amount, concept, and category are required fields.",
+    "error_transaction_invalid_type": "Transaction type must be 0 (Income) or 1 (Expense).",
+    "error_transaction_invalid_amount": "Amount must be a number greater than zero.",
+    "error_transaction_invalid_payment_method": "Payment method is invalid. Must be 0 (Cash), 1 (Transfer), 2 (Card), or 3 (Other).",
+    "error_transaction_not_found": "Transaction not found.",
+    "error_transaction_id_required": "Transaction ID is required.",
+    "error_transaction_invalid_id": "Provided transaction ID is invalid.",
+    "error_transaction_no_fields_update": "At least one valid field must be provided to update.",
+    "error_transaction_auth_required": "Authentication is required to perform this action.",
+
+    "success_transaction_created": "Transaction created successfully.",
+    "success_transaction_updated": "Transaction updated successfully.",
+    "success_transaction_deleted": "Transaction deleted successfully.",
+    "success_transactions_fetched": "Transactions fetched successfully.",
+    "success_transaction_fetched": "Transaction fetched successfully.",
+    "success_transaction_summary_fetched": "Transaction summary fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}
