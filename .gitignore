@@ -6,4 +6,3 @@ build/
 .idea/
 .opencode/
 EOT
-src/serviceAccountKey.json
