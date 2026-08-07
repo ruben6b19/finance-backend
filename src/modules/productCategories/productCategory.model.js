@@ -16,6 +16,16 @@ const productCategorySchema = new Schema(
       trim: true,
       default: ''
     },
+    isSellable: {
+      type: Boolean,
+      default: true,
+      index: true
+    },
+    isPurchasable: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
     status: {
       type: Number,
       required: true,

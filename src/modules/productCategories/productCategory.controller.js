@@ -17,7 +17,7 @@ const getLang = (req) => {
 
 const createProductCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const { name, description, status } = req.body;
+    const { name, description, status, isSellable, isPurchasable } = req.body;
 
     if (!name || !name.trim()) {
         return translateErrorResponse(res, lang, "error_productCategory_name_required", 400, translations);
@@ -27,6 +27,8 @@ const createProductCategory = asyncHandler(async (req, res) => {
         const category = await ProductCategory.create({
             name: name.trim(),
             description: description ? description.trim() : '',
+            isSellable: isSellable !== undefined ? isSellable : true,
+            isPurchasable: isPurchasable !== undefined ? isPurchasable : false,
             status: status !== undefined ? Number(status) : 1,
             createdBy: req.user?.mongoDbId || null
         });
@@ -46,7 +48,7 @@ const createProductCategory = asyncHandler(async (req, res) => {
 const getProductCategories = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const pageParam = req.params.page || req.query.page;
-    const { limit = 10, search, query, status, sortBy = 'name', sortOrder = 'asc' } = req.query;
+    const { limit = 10, search, query, status, isSellable, isPurchasable, sortBy = 'name', sortOrder = 'asc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
     const limitNumber = parseInt(limit) || 10;
 
@@ -54,6 +56,14 @@ const getProductCategories = asyncHandler(async (req, res) => {
 
     if (status !== undefined && status !== '') {
         filter.status = Number(status);
+    }
+
+    if (isSellable !== undefined && isSellable !== '') {
+        filter.isSellable = isSellable === 'true' || isSellable === true;
+    }
+
+    if (isPurchasable !== undefined && isPurchasable !== '') {
+        filter.isPurchasable = isPurchasable === 'true' || isPurchasable === true;
     }
 
     const term = search || query;
@@ -118,9 +128,9 @@ const updateProductCategory = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_productCategory_invalid_id", 400, translations);
     }
 
-    const { name, description, status } = req.body;
+    const { name, description, status, isSellable, isPurchasable } = req.body;
 
-    if (name === undefined && description === undefined && status === undefined) {
+    if (name === undefined && description === undefined && status === undefined && isSellable === undefined && isPurchasable === undefined) {
         return translateErrorResponse(res, lang, "error_productCategory_no_fields_update", 400, translations);
     }
 
@@ -129,6 +139,8 @@ const updateProductCategory = asyncHandler(async (req, res) => {
     if (name !== undefined) updateFields.name = name.trim();
     if (description !== undefined) updateFields.description = description ? description.trim() : '';
     if (status !== undefined) updateFields.status = Number(status);
+    if (isSellable !== undefined) updateFields.isSellable = isSellable;
+    if (isPurchasable !== undefined) updateFields.isPurchasable = isPurchasable;
 
     try {
         const updatedCategory = await ProductCategory.findByIdAndUpdate(
