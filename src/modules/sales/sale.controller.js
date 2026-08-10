@@ -66,7 +66,7 @@ const createSale = asyncHandler(async (req, res) => {
                 categoryId = defaultCategory._id;
             }
         }
-
+        console.log(`Creating sale with categoryId: ${categoryId}`);
         const sale = await Sale.create([{
             saleNumber: saleNumber ? saleNumber.trim() : undefined,
             customerName: customerName ? customerName.trim() : undefined,
@@ -108,6 +108,7 @@ const createSale = asyncHandler(async (req, res) => {
             notes: notes ? notes.trim() : undefined
         }], { session });
 
+        console.log(`Created transaction with ID: ${transaction}`);
         createdSale.transactionId = transaction[0]._id;
         await createdSale.save({ session });
 
