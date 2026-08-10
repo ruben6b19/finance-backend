@@ -61,7 +61,7 @@ const createSale = asyncHandler(async (req, res) => {
 
     try {
         if (!categoryId) {
-            const defaultCategory = await TransactionCategory.findOne({ name: 'Ventas', type: 0 }).session(session);
+            const defaultCategory = await TransactionCategory.findOne({ name: 'Ventas POS', type: 0, isSystem: true }).session(session);
             if (defaultCategory) {
                 categoryId = defaultCategory._id;
             }

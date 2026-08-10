@@ -3,6 +3,8 @@ import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { Purchase } from "./purchase.model.js";
 import { Product } from "../products/product.model.js";
+import { Transaction } from "../transactions/transaction.model.js";
+import { TransactionCategory } from "../transactionCategories/transactionCategory.model.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -19,7 +21,7 @@ const getLang = (req) => {
 
 const createPurchase = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const { purchaseNumber, supplierName, supplierId, items, subtotal, tax, discount, totalAmount, paymentMethod, paymentStatus, purchaseStatus, purchaseDate, transactionId, notes } = req.body;
+    const { purchaseNumber, supplierName, supplierId, items, subtotal, tax, discount, totalAmount, paymentMethod, paymentStatus, purchaseStatus, purchaseDate, transactionCategory, notes } = req.body;
 
     if (totalAmount === undefined) {
         return translateErrorResponse(res, lang, "error_purchase_required_fields", 400, translations);
@@ -49,8 +51,23 @@ const createPurchase = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_purchase_invalid_status", 400, translations);
     }
 
+    let categoryId = transactionCategory;
+    if (categoryId && !mongoose.Types.ObjectId.isValid(categoryId)) {
+        return translateErrorResponse(res, lang, "error_purchase_invalid_transaction_category", 400, translations);
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-        const purchase = await Purchase.create({
+        if (!categoryId) {
+            const defaultCategory = await TransactionCategory.findOne({ name: 'Compra de Insumos', type: 1, isSystem: true }).session(session);
+            if (defaultCategory) {
+                categoryId = defaultCategory._id;
+            }
+        }
+
+        const purchaseResults = await Purchase.create([{
             purchaseNumber: purchaseNumber ? purchaseNumber.trim() : undefined,
             supplierName: supplierName ? supplierName.trim() : undefined,
             supplierId: supplierId || null,
@@ -63,10 +80,11 @@ const createPurchase = asyncHandler(async (req, res) => {
             paymentStatus: selectedPaymentStatus,
             purchaseStatus: selectedPurchaseStatus,
             purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
-            transactionId: transactionId || null,
             notes: notes ? notes.trim() : undefined,
             createdBy: req.user?.mongoDbId || null
-        });
+        }], { session });
+
+        const purchase = purchaseResults[0];
 
         // ACTUALIZACIÓN DE STOCK AUTOMÁTICA
         if (items && items.length > 0) {
@@ -76,15 +94,36 @@ const createPurchase = asyncHandler(async (req, res) => {
 
                 await Product.findByIdAndUpdate(
                     product,
-                    { $inc: { stock: increaseAmount } }
+                    { $inc: { stock: increaseAmount } },
+                    { session }
                 );
             }
         }
+
+        // CREACIÓN DE TRANSACCIÓN AUTOMÁTICA (Gasto)
+        const transactionResults = await Transaction.create([{
+            type: 1, // Gasto
+            amount: numericTotalAmount,
+            paymentMethod: selectedPaymentMethod,
+            concept: `Compra ${purchaseNumber ? purchaseNumber.trim() : purchase._id}`,
+            category: categoryId,
+            date: purchaseDate ? new Date(purchaseDate) : new Date(),
+            purchaseId: purchase._id,
+            notes: notes ? notes.trim() : undefined
+        }], { session });
+
+        purchase.transactionId = transactionResults[0]._id;
+        await purchase.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(201).json(
             new ApiResponse(201, purchase, translations[lang]?.success_purchase_created || "success_purchase_created")
         );
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         console.error("Error creating purchase:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }

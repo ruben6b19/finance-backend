@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { DB_NAME } from "../constants.js";
-import { initDefaultCategories } from "./initDefaultCategories.js";
+//import { initDefaultCategories } from "./initDefaultCategories.js";
 
 
 const connectDB = async () => {
@@ -8,7 +8,7 @@ const connectDB = async () => {
         const connectionInstance = await mongoose.connect(`${process.env.MONGODB_URI}/${DB_NAME}`)
         console.log(`\n MongoDB connected !! DB HOST: ${connectionInstance.connection.host}`);
 
-        await initDefaultCategories();
+        //await initDefaultCategories();
     } catch (error) {
         console.log("MONGODB connection FAILED ", error);
         process.exit(1)

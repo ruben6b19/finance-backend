@@ -17,7 +17,7 @@ const getLang = (req) => {
 
 const createTransactionCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const { name, type, description, status } = req.body;
+    const { name, type, description, status, isSystem } = req.body;
 
     if (!name || !name.trim()) {
         return translateErrorResponse(res, lang, "error_transactionCategory_name_required", 400, translations);
@@ -34,6 +34,7 @@ const createTransactionCategory = asyncHandler(async (req, res) => {
             type: numericType,
             description: description ? description.trim() : '',
             status: status !== undefined ? Number(status) : 1,
+            isSystem: isSystem === true || isSystem === 'true',
             createdBy: req.user?.mongoDbId || null
         });
 
@@ -52,7 +53,7 @@ const createTransactionCategory = asyncHandler(async (req, res) => {
 const getTransactionCategories = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const pageParam = req.params.page || req.query.page;
-    const { limit = 10, search, query, type, status, sortBy = 'name', sortOrder = 'asc' } = req.query;
+    const { limit = 10, search, query, type, status, isSystem, sortBy = 'name', sortOrder = 'asc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
     const limitNumber = parseInt(limit) || 10;
 
@@ -64,6 +65,10 @@ const getTransactionCategories = asyncHandler(async (req, res) => {
 
     if (status !== undefined && status !== '') {
         filter.status = Number(status);
+    }
+
+    if (isSystem !== undefined && isSystem !== '') {
+        filter.isSystem = isSystem === true || isSystem === 'true';
     }
 
     const term = search || query;
@@ -129,26 +134,39 @@ const updateTransactionCategory = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_transactionCategory_invalid_id", 400, translations);
     }
 
-    const { name, type, description, status } = req.body;
+    const { name, type, description, status, isSystem } = req.body;
 
-    if (name === undefined && type === undefined && description === undefined && status === undefined) {
+    if (name === undefined && type === undefined && description === undefined && status === undefined && isSystem === undefined) {
         return translateErrorResponse(res, lang, "error_transactionCategory_no_fields_update", 400, translations);
     }
 
-    const updateFields = {};
-
-    if (name !== undefined) updateFields.name = name.trim();
-    if (type !== undefined) {
-        const numericType = Number(type);
-        if (![0, 1].includes(numericType)) {
-            return translateErrorResponse(res, lang, "error_transactionCategory_invalid_type", 400, translations);
-        }
-        updateFields.type = numericType;
-    }
-    if (description !== undefined) updateFields.description = description ? description.trim() : '';
-    if (status !== undefined) updateFields.status = Number(status);
-
     try {
+        const category = await TransactionCategory.findById(categoryId);
+
+        if (!category) {
+            return translateErrorResponse(res, lang, "error_transactionCategory_not_found", 404, translations);
+        }
+
+        if (category.isSystem) {
+            return res.status(403).json(
+                new ApiResponse(403, null, "No se puede modificar una categoría del sistema")
+            );
+        }
+
+        const updateFields = {};
+
+        if (name !== undefined) updateFields.name = name.trim();
+        if (type !== undefined) {
+            const numericType = Number(type);
+            if (![0, 1].includes(numericType)) {
+                return translateErrorResponse(res, lang, "error_transactionCategory_invalid_type", 400, translations);
+            }
+            updateFields.type = numericType;
+        }
+        if (description !== undefined) updateFields.description = description ? description.trim() : '';
+        if (status !== undefined) updateFields.status = Number(status);
+        if (isSystem !== undefined) updateFields.isSystem = isSystem === true || isSystem === 'true';
+
         const updatedCategory = await TransactionCategory.findByIdAndUpdate(
             categoryId,
             { $set: updateFields },
@@ -180,11 +198,19 @@ const deleteTransactionCategory = asyncHandler(async (req, res) => {
     }
 
     try {
-        const deletedCategory = await TransactionCategory.findByIdAndDelete(categoryId);
+        const category = await TransactionCategory.findById(categoryId);
 
-        if (!deletedCategory) {
+        if (!category) {
             return translateErrorResponse(res, lang, "error_transactionCategory_not_found", 404, translations);
         }
+
+        if (category.isSystem) {
+            return res.status(403).json(
+                new ApiResponse(403, null, "No se puede eliminar una categoría del sistema")
+            );
+        }
+
+        await TransactionCategory.findByIdAndDelete(categoryId);
 
         return res.status(200).json(
             new ApiResponse(200, {}, translations[lang]?.success_transactionCategory_deleted || "success_transactionCategory_deleted")

@@ -29,6 +29,11 @@ const transactionCategorySchema = new Schema(
       default: 1,
       index: true
     },
+    isSystem: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
