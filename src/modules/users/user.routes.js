@@ -4,7 +4,8 @@ import {
     logoutUser, 
     registerUser, 
     refreshAccessToken, 
-    updateUserAvatar, 
+    refreshAccessToken2,
+    updateUserAvatar,
     updateUserCoverImage, 
     getUserChannelProfile, 
     getWatchHistory, 
@@ -30,7 +31,7 @@ router.route("/verify-token").post(verifyIdToken)
 router.route("/institute/:instituteId/all/:page").get(verifyFirebaseToken, getUsersByInstitute)
 //secured routes
 router.route("/logout").post(verifyFirebaseToken,  logoutUser)
-router.route("/refresh-token").post(refreshAccessToken)
+router.route("/refresh-token").post(refreshAccessToken2)
 
 router.route("/all/:page").get(verifyFirebaseToken, getAllUsers);
 

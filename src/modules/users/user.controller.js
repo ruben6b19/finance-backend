@@ -909,10 +909,17 @@ const refreshAccessToken2 = asyncHandler(async (req, res) => {
         }
 
         console.log("data refresh Token", data);
+
+        // Firebase Tokens Info:
+        // id_token (accessToken): Expira en 1 hora (3600 segundos)
+        // refresh_token: Indefinido (hasta que sea revocado)
+
         return res.status(200).json(
             new ApiResponse(200, {
-                accessToken: data.id_token, // El nuevo token de acceso
-                refreshToken: data.refresh_token // Firebase a veces devuelve uno nuevo
+                accessToken: data.id_token, // El nuevo token de acceso (expira en 1h)
+                refreshToken: data.refresh_token, // El nuevo refresh token (si aplica)
+                expiresIn: data.expires_in, // Segundos hasta la expiración (usualmente 3600)
+                tokenType: data.token_type // 'Bearer'
             }, "Token refreshed successfully")
         );
     } catch (error) {
@@ -1209,6 +1216,7 @@ export {
     verifyIdToken,
     logoutUser,
     refreshAccessToken,
+    refreshAccessToken2,
 
     updateUserAvatar,
     updateUserCoverImage,
