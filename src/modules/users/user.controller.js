@@ -617,6 +617,7 @@ const verifyIdToken = asyncHandler(async (req, res) => {
                 expiresIn = parseInt(refreshData.expires_in);
             }
         }
+        console.log("tokens", finalRefreshToken, finalIdToken, expiresIn);
 
         const expiresAt = Date.now() + (expiresIn * 1000);
 
