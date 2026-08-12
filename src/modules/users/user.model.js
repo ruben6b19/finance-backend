@@ -51,19 +51,7 @@ const userSchema = new Schema(
             type: Schema.Types.ObjectId,
             ref: 'User', // Asumiendo un modelo 'User' para auditoría
             required: false,
-        },
-        // institute: {
-        //     type: Schema.Types.ObjectId,
-        //     ref: 'Institute', 
-        //     required: true,
-        // },
-        // password: {
-        //     type: String,
-        //     required: [true, 'Password is required']
-        // },
-        // refreshToken: {
-        //     type: String
-        // }
+        }
     },
     {
         timestamps: true
@@ -109,19 +97,6 @@ userSchema.methods.generateAccessToken = function() {
         }
     );
 };
-
-userSchema.methods.generateRefreshToken = function(){
-    return jwt.sign(
-        {
-            _id: this._id,
-            
-        },
-        process.env.REFRESH_TOKEN_SECRET,
-        {
-            expiresIn: process.env.REFRESH_TOKEN_EXPIRY
-        }
-    )
-}
 
 // userSchema.pre("save", async function (next) {
 //     if(!this.isModified("password")) return next();

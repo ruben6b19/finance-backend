@@ -563,8 +563,8 @@ const getUsersByInstitute = asyncHandler(async (req, res) => {
 });
 
 const verifyIdToken = asyncHandler(async (req, res) => {
-    // 1. Recibimos el idToken Y el refreshToken del frontend
-    const { idToken, refreshToken } = req.body; 
+    // 1. Recibimos el idToken del frontend
+    const { idToken } = req.body;
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
 
     if (!idToken) {
@@ -572,55 +572,50 @@ const verifyIdToken = asyncHandler(async (req, res) => {
     }
 
     try {
+        // A. Verificar el idToken inicial para saber quién es el usuario
         const decodedToken = await getAuth().verifyIdToken(idToken);
         const firebaseUid = decodedToken.uid;
-        console.log("decodedToken", decodedToken);
 
-        const user = await User.findOne({ firebaseUid })
-            .select('_id role email fullName');
-
+        const user = await User.findOne({ firebaseUid }).select('_id role email fullName');
         if (!user) throw new ApiError(404, "User not found");
-        console.log("llega");
 
         const mongoDbId = user._id.toString();
 
-        // 2. Seteamos los Custom Claims limpios
-        const customClaims = {
+        // B. Crear Custom Token con los claims que necesitamos (mongoDbId y role)
+        // Esto "empaqueta" los datos en un token firmado por nosotros que Firebase acepta.
+        const additionalClaims = {
             mongoDbId: mongoDbId,
             role: user.role
         };
+        const customToken = await getAuth().createCustomToken(firebaseUid, additionalClaims);
 
-        await getAuth().setCustomUserClaims(firebaseUid, customClaims);
+        // C. INTERCAMBIAR el Custom Token por ID y REFRESH tokens REALES de Firebase
+        // Usamos la API REST de Google Identity Toolkit
+        const exchangeResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${process.env.FIREBASE_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token: customToken,
+                returnSecureToken: true
+            })
+        });
 
-        // 🎯 3. EL TRUCO: Refrescamos el token AQUÍ MISMO si nos enviaron el refreshToken
-        let finalIdToken = idToken;
-        let finalRefreshToken = refreshToken;
-        let expiresIn = 3600;
+        const exchangeData = await exchangeResponse.json();
 
-        if (refreshToken) {
-            const refreshResponse = await fetch(`https://securetoken.googleapis.com/v1/token?key=${process.env.FIREBASE_API_KEY}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    grant_type: 'refresh_token',
-                    refresh_token: refreshToken
-                })
-            });
-            
-            const refreshData = await refreshResponse.json();
-            console.log("refreshResponse", refreshData);
-            if (!refreshData.error) {
-                finalIdToken = refreshData.id_token;     // Este ya trae los Custom Claims nuevos
-                finalRefreshToken = refreshData.refresh_token;
-                expiresIn = parseInt(refreshData.expires_in);
-            }
+        if (exchangeData.error) {
+            console.error("Firebase Exchange Error:", exchangeData.error);
+            throw new ApiError(401, "Failed to generate official Firebase tokens");
         }
-        console.log("tokens", finalRefreshToken, finalIdToken, expiresIn);
 
+        // Extraer los tokens oficiales
+        const finalIdToken = exchangeData.idToken;      // Trae los claims inyectados en el Custom Token
+        const finalRefreshToken = exchangeData.refreshToken;
+        const expiresIn = parseInt(exchangeData.expiresIn);
         const expiresAt = Date.now() + (expiresIn * 1000);
 
+        console.log("verifyIdToken - finalIdToken:", finalIdToken);
+        console.log("verifyIdToken - finalRefreshToken:", finalRefreshToken);
+        console.log("verifyIdToken - expiresIn:", expiresIn);
         return res.status(200).json(
             new ApiResponse(
                 200, 
@@ -631,7 +626,6 @@ const verifyIdToken = asyncHandler(async (req, res) => {
                         fullName: user.fullName,
                         role: user.role
                     },
-                    // Devolvemos los tokens actualizados
                     accessToken: finalIdToken,
                     refreshToken: finalRefreshToken,
                     expiresAt: expiresAt,
@@ -642,7 +636,8 @@ const verifyIdToken = asyncHandler(async (req, res) => {
         );
 
     } catch (error) {
-        throw new ApiError(401, "Auth failed");
+        console.error("verifyIdToken Error:", error);
+        throw new ApiError(401, error?.message || "Auth failed");
     }
 });
 
@@ -894,9 +889,11 @@ const refreshAccessToken2 = asyncHandler(async (req, res) => {
     }
 
     try {
+        console.log("Refreshing Firebase token...");
         // Llamada a la API de Google para intercambiar el Refresh Token por un nuevo ID Token
         const response = await fetch(`https://securetoken.googleapis.com/v1/token?key=${process.env.FIREBASE_API_KEY}`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 grant_type: 'refresh_token',
                 refresh_token: refreshToken
@@ -906,27 +903,28 @@ const refreshAccessToken2 = asyncHandler(async (req, res) => {
         const data = await response.json();
 
         if (data.error) {
+            console.error("Firebase Refresh Error:", data.error);
             throw new ApiError(401, "Invalid refresh token");
         }
 
-        console.log("data refresh Token", data);
-
-        // Firebase Tokens Info:
-        // id_token (accessToken): Expira en 1 hora (3600 segundos)
-        // refresh_token: Indefinido (hasta que sea revocado)
+        const expiresIn = parseInt(data.expires_in);
+        const expiresAt = Date.now() + (expiresIn * 1000);
 
         return res.status(200).json(
             new ApiResponse(200, {
                 accessToken: data.id_token, // El nuevo token de acceso (expira en 1h)
-                refreshToken: data.refresh_token, // El nuevo refresh token (si aplica)
-                expiresIn: data.expires_in, // Segundos hasta la expiración (usualmente 3600)
+                refreshToken: data.refresh_token || refreshToken, // Conservar el original si no rota
+                expiresIn: expiresIn,
+                expiresAt: expiresAt,
                 tokenType: data.token_type // 'Bearer'
             }, "Token refreshed successfully")
         );
     } catch (error) {
-        throw new ApiError(401, "Token refresh failed");
+        console.error("Refresh Process Error:", error);
+        throw new ApiError(401, error?.message || "Token refresh failed");
     }
 });
+
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
     const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken
