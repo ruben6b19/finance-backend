@@ -306,6 +306,20 @@ const updatePurchase = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_purchase_not_found", 404, translations);
         }
 
+        // Rule: Only today's purchases (considering Bolivia time UTC-4)
+        const getBoliviaDay = (d) => {
+            const date = new Date(d);
+            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+            return boliviaTime.toISOString().split('T')[0];
+        };
+
+        const txDate = getBoliviaDay(updatedPurchase.purchaseDate);
+        const today = getBoliviaDay(new Date());
+
+        if (txDate !== today) {
+            return translateErrorResponse(res, lang, "error_purchase_immutable_date", 403, translations);
+        }
+
         return res.status(200).json(
             new ApiResponse(200, updatedPurchase, translations[lang]?.success_purchase_updated || "success_purchase_updated")
         );
@@ -333,6 +347,22 @@ const deletePurchase = asyncHandler(async (req, res) => {
             await session.abortTransaction();
             session.endSession();
             return translateErrorResponse(res, lang, "error_purchase_not_found", 404, translations);
+        }
+
+        // Rule: Only today's purchases (considering Bolivia time UTC-4)
+        const getBoliviaDay = (d) => {
+            const date = new Date(d);
+            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+            return boliviaTime.toISOString().split('T')[0];
+        };
+
+        const txDate = getBoliviaDay(purchase.purchaseDate);
+        const today = getBoliviaDay(new Date());
+
+        if (txDate !== today) {
+            await session.abortTransaction();
+            session.endSession();
+            return translateErrorResponse(res, lang, "error_purchase_immutable_date", 403, translations);
         }
 
         // 1. REVERSIÓN DE STOCK (Solo para Productos Directos - Tipo 2)

@@ -234,9 +234,17 @@ const updateTransaction = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_transaction_immutable_system", 403, translations);
         }
 
-        // Rule 2: Only today's transactions
-        const txDate = new Date(transaction.date).toISOString().split('T')[0];
-        const today = new Date().toISOString().split('T')[0];
+        // Rule 2: Only today's transactions (considering Bolivia time UTC-4)
+        const getBoliviaDay = (d) => {
+            const date = new Date(d);
+            // Restamos 4 horas para obtener la fecha en Bolivia
+            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+            return boliviaTime.toISOString().split('T')[0];
+        };
+
+        const txDate = getBoliviaDay(transaction.date);
+        const today = getBoliviaDay(new Date());
+
         if (txDate !== today) {
             return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
         }
@@ -276,9 +284,17 @@ const deleteTransaction = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_transaction_immutable_system", 403, translations);
         }
 
-        // Rule 2: Only today's transactions
-        const txDate = new Date(transaction.date).toISOString().split('T')[0];
-        const today = new Date().toISOString().split('T')[0];
+        // Rule 2: Only today's transactions (considering Bolivia time UTC-4)
+        const getBoliviaDay = (d) => {
+            const date = new Date(d);
+            // Restamos 4 horas para obtener la fecha en Bolivia
+            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+            return boliviaTime.toISOString().split('T')[0];
+        };
+
+        const txDate = getBoliviaDay(transaction.date);
+        const today = getBoliviaDay(new Date());
+
         if (txDate !== today) {
             return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
         }

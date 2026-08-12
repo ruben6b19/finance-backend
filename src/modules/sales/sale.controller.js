@@ -303,6 +303,20 @@ const updateSale = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
         }
 
+        // Rule: Only today's sales (considering Bolivia time UTC-4)
+        const getBoliviaDay = (d) => {
+            const date = new Date(d);
+            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+            return boliviaTime.toISOString().split('T')[0];
+        };
+
+        const txDate = getBoliviaDay(updatedSale.saleDate);
+        const today = getBoliviaDay(new Date());
+
+        if (txDate !== today) {
+            return translateErrorResponse(res, lang, "error_sale_immutable_date", 403, translations);
+        }
+
         return res.status(200).json(
             new ApiResponse(200, updatedSale, translations[lang]?.success_sale_updated || "success_sale_updated")
         );
@@ -330,6 +344,22 @@ const deleteSale = asyncHandler(async (req, res) => {
             await session.abortTransaction();
             session.endSession();
             return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
+        }
+
+        // Rule: Only today's sales (considering Bolivia time UTC-4)
+        const getBoliviaDay = (d) => {
+            const date = new Date(d);
+            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+            return boliviaTime.toISOString().split('T')[0];
+        };
+
+        const txDate = getBoliviaDay(sale.saleDate);
+        const today = getBoliviaDay(new Date());
+
+        if (txDate !== today) {
+            await session.abortTransaction();
+            session.endSession();
+            return translateErrorResponse(res, lang, "error_sale_immutable_date", 403, translations);
         }
 
         // 1. REVERSIÓN DE STOCK (Si la venta no estaba ya cancelada)
@@ -451,6 +481,22 @@ const cancelSale = asyncHandler(async (req, res) => {
       await session.abortTransaction();
       session.endSession();
       return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
+    }
+
+    // Rule: Only today's sales (considering Bolivia time UTC-4)
+    const getBoliviaDay = (d) => {
+        const date = new Date(d);
+        const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
+        return boliviaTime.toISOString().split('T')[0];
+    };
+
+    const txDate = getBoliviaDay(sale.saleDate);
+    const today = getBoliviaDay(new Date());
+
+    if (txDate !== today) {
+        await session.abortTransaction();
+        session.endSession();
+        return translateErrorResponse(res, lang, "error_sale_immutable_date", 403, translations);
     }
 
     if (sale.saleStatus === 2) {

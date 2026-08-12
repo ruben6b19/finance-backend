@@ -12,6 +12,7 @@
     "error_sale_items_required": "Debe incluir al menos un producto o ítem en la venta.",
     "error_sale_invalid_transaction_category": "La categoría de transacción proporcionada no es válida.",
     "error_sale_already_cancelled": "Esta venta ya se encuentra anulada.",
+    "error_sale_immutable_date": "Solo se pueden modificar, anular o eliminar ventas realizadas el día de hoy.",
 
     "success_sale_created": "Venta creada exitosamente.",
     "success_sale_updated": "Venta actualizada exitosamente.",
