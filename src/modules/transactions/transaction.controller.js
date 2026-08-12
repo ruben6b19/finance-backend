@@ -74,12 +74,17 @@ const createTransaction = asyncHandler(async (req, res) => {
 const getTransactions = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const pageParam = req.params.page || req.query.page;
-    const { limit = 10, search, query, type, category, paymentMethod, startDate, endDate, sortBy = 'date', sortOrder = 'desc' } = req.query;
+    const { limit = 10, search, query, type, category, userId, paymentMethod, startDate, endDate, sortBy = 'date', sortOrder = 'desc' } = req.query;
     console.log("getTransactions query params:", req.query);
     const pageNumber = parseInt(pageParam) || 1;
     const limitNumber = parseInt(limit) || 10;
 
     const filter = { status: 1 };
+
+    // Filter by user (createdBy)
+    if (userId && userId.trim() !== '') {
+        filter.createdBy = userId;
+    }
 
     // Filter by type (0: Income, 1: Expense)
     if (type !== undefined && type !== '') {
@@ -291,12 +296,16 @@ const deleteTransaction = asyncHandler(async (req, res) => {
 
 const getTransactionSummary = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const { startDate, endDate, category } = req.query;
+    const { startDate, endDate, category, userId } = req.query;
 
     const matchStage = { status: 1 };
 
     if (category && category.trim() !== '') {
         matchStage.category = new mongoose.Types.ObjectId(category);
+    }
+
+    if (userId && userId.trim() !== '') {
+        matchStage.createdBy = new mongoose.Types.ObjectId(userId);
     }
 
     if (startDate || endDate) {

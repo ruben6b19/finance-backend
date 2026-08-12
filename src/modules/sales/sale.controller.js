@@ -131,11 +131,15 @@ const getSales = asyncHandler(async (req, res) => {
     console.log(`Fetching sales`);
     const lang = getLang(req);
     const pageParam = req.params.page || req.query.page;
-    const { limit = 10, search, query, paymentMethod, paymentStatus, saleStatus, startDate, endDate, sortBy = 'saleDate', sortOrder = 'desc' } = req.query;
+    const { limit = 10, search, query, paymentMethod, paymentStatus, saleStatus, userId, startDate, endDate, sortBy = 'saleDate', sortOrder = 'desc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
     const limitNumber = parseInt(limit) || 10;
 
     const filter = {};
+
+    if (userId && userId.trim() !== '') {
+        filter.createdBy = userId;
+    }
 
     if (paymentMethod !== undefined && paymentMethod !== '') {
         filter.paymentMethod = Number(paymentMethod);
