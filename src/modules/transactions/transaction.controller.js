@@ -58,7 +58,8 @@ const createTransaction = asyncHandler(async (req, res) => {
             date: date ? new Date(date) : new Date(),
             saleId: saleId || null,
             purchaseId: purchaseId || null,
-            notes: notes ? notes.trim() : undefined
+            notes: notes ? notes.trim() : undefined,
+            createdBy: req.user?.mongoDbId || null
         });
 
         return res.status(201).json(
@@ -123,7 +124,7 @@ const getTransactions = asyncHandler(async (req, res) => {
     };
 
     try {
-        const results = await Transaction.paginate(filter, options);
+        const results = await Transaction.paginate(filter, { ...options, populate: 'createdBy' });
 
         console.log("getTransactions results:", results.pages, results.totalDocs, results.limit, results.page, results.totalPages);
         return res.status(200).json(

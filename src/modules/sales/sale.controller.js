@@ -105,7 +105,8 @@ const createSale = asyncHandler(async (req, res) => {
             category: categoryId,
             date: saleDate ? new Date(saleDate) : new Date(),
             saleId: createdSale._id,
-            notes: notes ? notes.trim() : undefined
+            notes: notes ? notes.trim() : undefined,
+            createdBy: req.user?.mongoDbId || null
         }], { session });
 
         console.log(`Created transaction with ID: ${transaction}`);
@@ -178,7 +179,7 @@ const getSales = asyncHandler(async (req, res) => {
     };
 
     try {
-        const results = await Sale.paginate(filter, { ...options, populate: 'items.product' });
+        const results = await Sale.paginate(filter, { ...options, populate: ['items.product', 'createdBy'] });
 
         return res.status(200).json(
             new ApiResponse(200, results, translations[lang]?.success_sales_fetched || "success_sales_fetched")

@@ -109,7 +109,8 @@ const createPurchase = asyncHandler(async (req, res) => {
             category: categoryId,
             date: purchaseDate ? new Date(purchaseDate) : new Date(),
             purchaseId: purchase._id,
-            notes: notes ? notes.trim() : undefined
+            notes: notes ? notes.trim() : undefined,
+            createdBy: req.user?.mongoDbId || null
         }], { session });
 
         purchase.transactionId = transactionResults[0]._id;
@@ -181,7 +182,7 @@ const getPurchases = asyncHandler(async (req, res) => {
     };
 
     try {
-        const results = await Purchase.paginate(filter, { ...options, populate: 'items.product' });
+        const results = await Purchase.paginate(filter, { ...options, populate: ['items.product', 'createdBy'] });
 
         return res.status(200).json(
             new ApiResponse(200, results, translations[lang]?.success_purchases_fetched || "success_purchases_fetched")

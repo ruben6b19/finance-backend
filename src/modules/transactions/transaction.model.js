@@ -59,6 +59,11 @@ const transactionSchema = new Schema(
     notes: {
       type: String,
       trim: true
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
     }
   },
   {
