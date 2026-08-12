@@ -318,14 +318,19 @@ const deletePurchase = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_purchase_invalid_id", 400, translations);
     }
 
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-        const purchase = await Purchase.findById(purchaseId);
+        const purchase = await Purchase.findById(purchaseId).session(session);
 
         if (!purchase) {
+            await session.abortTransaction();
+            session.endSession();
             return translateErrorResponse(res, lang, "error_purchase_not_found", 404, translations);
         }
 
-        // REVERSIÓN DE STOCK ANTES DE ELIMINAR (Solo para Productos Directos - Tipo 2)
+        // 1. REVERSIÓN DE STOCK (Solo para Productos Directos - Tipo 2)
         if (purchase.items && purchase.items.length > 0) {
             for (const item of purchase.items) {
                 const { product, quantity, conversionFactor = 1 } = item;
@@ -333,17 +338,33 @@ const deletePurchase = asyncHandler(async (req, res) => {
 
                 await Product.updateOne(
                     { _id: product, productType: 2 },
-                    { $inc: { stock: decreaseAmount } }
+                    { $inc: { stock: decreaseAmount } },
+                    { session }
                 );
             }
         }
 
-        await Purchase.findByIdAndDelete(purchaseId);
+        // 2. ANULACIÓN DE TRANSACCIÓN VINCULADA
+        if (purchase.transactionId) {
+            await Transaction.findByIdAndUpdate(
+                purchase.transactionId,
+                { status: 0 },
+                { session }
+            );
+        }
+
+        // 3. ELIMINACIÓN DEL REGISTRO DE COMPRA
+        await Purchase.findByIdAndDelete(purchaseId, { session });
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json(
-            new ApiResponse(200, {}, translations[lang]?.success_product_deleted || "success_product_deleted")
+            new ApiResponse(200, {}, translations[lang]?.success_purchase_deleted || "success_purchase_deleted")
         );
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         console.error("Error deleting purchase:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }

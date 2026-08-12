@@ -277,7 +277,7 @@ const deleteTransaction = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
         }
 
-        await Transaction.findByIdAndDelete(transactionId);
+        await Transaction.findByIdAndUpdate(transactionId, { status: 0 });
 
         return res.status(200).json(
             new ApiResponse(200, {}, translations[lang]?.success_transaction_deleted || "success_transaction_deleted")

@@ -315,17 +315,50 @@ const deleteSale = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_sale_invalid_id", 400, translations);
     }
 
-    try {
-        const deletedSale = await Sale.findByIdAndDelete(saleId);
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-        if (!deletedSale) {
+    try {
+        const sale = await Sale.findById(saleId).session(session);
+
+        if (!sale) {
+            await session.abortTransaction();
+            session.endSession();
             return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
         }
+
+        // 1. REVERSIÓN DE STOCK (Si la venta no estaba ya cancelada)
+        if (sale.saleStatus !== 2) {
+            for (const item of sale.items) {
+                await Product.updateOne(
+                    { _id: item.product, productType: 2 },
+                    { $inc: { stock: item.quantity } },
+                    { session }
+                );
+            }
+        }
+
+        // 2. ANULACIÓN DE TRANSACCIÓN VINCULADA
+        if (sale.transactionId) {
+            await Transaction.findByIdAndUpdate(
+                sale.transactionId,
+                { status: 0 },
+                { session }
+            );
+        }
+
+        // 3. ELIMINACIÓN DEL REGISTRO DE VENTA
+        await Sale.findByIdAndDelete(saleId, { session });
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json(
             new ApiResponse(200, {}, translations[lang]?.success_sale_deleted || "success_sale_deleted")
         );
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         console.error("Error deleting sale:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }
