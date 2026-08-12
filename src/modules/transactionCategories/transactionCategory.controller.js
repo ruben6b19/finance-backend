@@ -38,8 +38,10 @@ const createTransactionCategory = asyncHandler(async (req, res) => {
             createdBy: req.user?.mongoDbId || null
         });
 
+        const populatedCategory = await TransactionCategory.findById(category._id).populate('createdBy');
+
         return res.status(201).json(
-            new ApiResponse(201, category, translations[lang]?.success_transactionCategory_created || "success_transactionCategory_created")
+            new ApiResponse(201, populatedCategory, translations[lang]?.success_transactionCategory_created || "success_transactionCategory_created")
         );
     } catch (error) {
         if (error.code === 11000) {
@@ -90,7 +92,7 @@ const getTransactionCategories = asyncHandler(async (req, res) => {
     };
 
     try {
-        const results = await TransactionCategory.paginate(filter, options);
+        const results = await TransactionCategory.paginate(filter, { ...options, populate: 'createdBy' });
 
         console.log("Fetched transaction categories:", results); // Debugging log
         return res.status(200).json(
@@ -111,7 +113,7 @@ const getTransactionCategoryById = asyncHandler(async (req, res) => {
     }
 
     try {
-        const category = await TransactionCategory.findById(categoryId);
+        const category = await TransactionCategory.findById(categoryId).populate('createdBy');
 
         if (!category) {
             return translateErrorResponse(res, lang, "error_transactionCategory_not_found", 404, translations);
@@ -171,7 +173,7 @@ const updateTransactionCategory = asyncHandler(async (req, res) => {
             categoryId,
             { $set: updateFields },
             { new: true, runValidators: true }
-        );
+        ).populate('createdBy');
 
         if (!updatedCategory) {
             return translateErrorResponse(res, lang, "error_transactionCategory_not_found", 404, translations);

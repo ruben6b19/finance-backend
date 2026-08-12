@@ -67,7 +67,7 @@ const createProduct = asyncHandler(async (req, res) => {
             createdBy: req.user?.mongoDbId || null
         });
 
-        const populatedProduct = await Product.findById(product._id).populate('unit');
+        const populatedProduct = await Product.findById(product._id).populate(['unit', 'createdBy']);
 
         return res.status(201).json(
             new ApiResponse(201, populatedProduct, translations[lang]?.success_product_created || "success_product_created")
@@ -119,7 +119,7 @@ const getProducts = asyncHandler(async (req, res) => {
     };
 
     try {
-        const results = await Product.paginate(filter, { ...options, populate: 'unit' });
+        const results = await Product.paginate(filter, { ...options, populate: ['unit', 'createdBy'] });
 
         return res.status(200).json(
             new ApiResponse(200, results, translations[lang]?.success_products_fetched || "success_products_fetched")
@@ -139,7 +139,7 @@ const getProductById = asyncHandler(async (req, res) => {
     }
 
     try {
-        const product = await Product.findById(productId).populate('unit');
+        const product = await Product.findById(productId).populate(['unit', 'createdBy']);
 
         if (!product) {
             return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
@@ -220,7 +220,7 @@ const updateProduct = asyncHandler(async (req, res) => {
             productId,
             { $set: updateFields },
             { new: true, runValidators: true }
-        ).populate('unit');
+        ).populate(['unit', 'createdBy']);
 
         if (!updatedProduct) {
             return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
