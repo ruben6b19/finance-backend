@@ -217,15 +217,29 @@ const updateTransaction = asyncHandler(async (req, res) => {
     if (notes !== undefined) updateFields.notes = notes.trim();
 
     try {
+        const transaction = await Transaction.findById(transactionId);
+
+        if (!transaction) {
+            return translateErrorResponse(res, lang, "error_transaction_not_found", 404, translations);
+        }
+
+        // Rule 1: No system transactions
+        if (transaction.saleId || transaction.purchaseId) {
+            return translateErrorResponse(res, lang, "error_transaction_immutable_system", 403, translations);
+        }
+
+        // Rule 2: Only today's transactions
+        const txDate = new Date(transaction.date).toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
+        if (txDate !== today) {
+            return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
+        }
+
         const updatedTransaction = await Transaction.findByIdAndUpdate(
             transactionId,
             { $set: updateFields },
             { new: true, runValidators: true }
         );
-
-        if (!updatedTransaction) {
-            return translateErrorResponse(res, lang, "error_transaction_not_found", 404, translations);
-        }
 
         return res.status(200).json(
             new ApiResponse(200, updatedTransaction, translations[lang]?.success_transaction_updated || "success_transaction_updated")
@@ -245,11 +259,25 @@ const deleteTransaction = asyncHandler(async (req, res) => {
     }
 
     try {
-        const deletedTransaction = await Transaction.findByIdAndDelete(transactionId);
+        const transaction = await Transaction.findById(transactionId);
 
-        if (!deletedTransaction) {
+        if (!transaction) {
             return translateErrorResponse(res, lang, "error_transaction_not_found", 404, translations);
         }
+
+        // Rule 1: No system transactions
+        if (transaction.saleId || transaction.purchaseId) {
+            return translateErrorResponse(res, lang, "error_transaction_immutable_system", 403, translations);
+        }
+
+        // Rule 2: Only today's transactions
+        const txDate = new Date(transaction.date).toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
+        if (txDate !== today) {
+            return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
+        }
+
+        await Transaction.findByIdAndDelete(transactionId);
 
         return res.status(200).json(
             new ApiResponse(200, {}, translations[lang]?.success_transaction_deleted || "success_transaction_deleted")

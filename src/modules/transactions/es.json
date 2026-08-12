@@ -7,6 +7,8 @@
     "error_transaction_id_required": "El ID de la transacción es obligatorio.",
     "error_transaction_invalid_id": "El ID de transacción proporcionado no es válido.",
     "error_transaction_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_transaction_immutable_system": "No se puede modificar una transacción generada automáticamente por el sistema (Venta/Compra).",
+    "error_transaction_immutable_date": "Solo se pueden modificar o eliminar transacciones realizadas el día de hoy.",
     "error_transaction_auth_required": "Se requiere autenticación para realizar esta acción.",
 
     "success_transaction_created": "Transacción creada exitosamente.",
