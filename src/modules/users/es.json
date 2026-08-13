@@ -9,13 +9,16 @@
     "error_user_creation_failed_db": "Algo salió mal al intentar guardar el usuario en la base de datos. Se eliminó la cuenta de Firebase.",
     "error_user_cannot_delete_is_teaching": "No se puede eliminar el usuario: Este usuario está asignado actualmente como maestro en uno o más cursos activos.",
     "error_user_cannot_delete_is_enrolled": "No se puede eliminar el usuario: Este usuario está inscrito actualmente en uno o más cursos activos.",
-    
+    "error_user_invalid_password": "La contraseña debe tener al menos 6 caracteres.",
+    "error_user_change_password_failed": "No se pudo cambiar la contraseña en Firebase.",
+
     "validation_error_unique_email": "Ya existe un usuario registrado con este correo electrónico.",
     "validation_error_invalid_institute_id": "El ID de Instituto proporcionado es inválido para la búsqueda o creación.",
 
     "success_user_registered": "Usuario registrado exitosamente.",
     "success_user_updated": "Usuario actualizado exitosamente.",
     "success_user_deleted": "Usuario eliminado exitosamente.",
+    "success_user_password_changed": "Contraseña actualizada exitosamente.",
     "success_users_fetched": "Usuarios obtenidos exitosamente para el instituto.",
     "success_user_claims_updated": "Claims de roles y MongoDB ID actualizados en el token de Firebase. Refresque el token en el cliente.",
     

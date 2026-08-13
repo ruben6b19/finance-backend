@@ -14,7 +14,8 @@ import {
     getAllUsers,
     getUsersByInstitute,
     updateUser,
-    deleteUser
+    deleteUser,
+    changePassword
 } from "./user.controller.js";
 //import {upload} from "../../middlewares/multer.middleware.js"
 import { verifyFirebaseToken, verifyJWT } from "../../middlewares/auth.middleware.js";
@@ -27,6 +28,7 @@ router.route("/").post(verifyFirebaseToken, registerUser)
 
 router.route("/login").post(loginUser)
 router.route("/verify-token").post(verifyIdToken)
+router.route("/change-password").post(verifyFirebaseToken, changePassword)
 
 router.route("/institute/:instituteId/all/:page").get(verifyFirebaseToken, getUsersByInstitute)
 //secured routes

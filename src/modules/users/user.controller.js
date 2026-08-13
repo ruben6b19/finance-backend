@@ -432,6 +432,43 @@ const updateUserfirebase = asyncHandler( async (req, res) => {
     );
 });
 
+const changePassword = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const { newPassword } = req.body;
+    const firebaseUid = req.user?.firebaseUid;
+
+    if (!newPassword || newPassword.length < 6) {
+        return translateErrorResponse(res, lang, "error_user_invalid_password", 400, translations);
+    }
+
+    if (!firebaseUid) {
+        throw new ApiError(401, "User not authenticated or missing Firebase UID");
+    }
+
+    try {
+        // 1. Actualizar en Firebase Auth
+        await getAuth().updateUser(firebaseUid, {
+            password: newPassword
+        });
+
+        // 2. Actualizar en MongoDB (opcional si no guardas pass hash, pero buena práctica si lo haces)
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        await User.findOneAndUpdate(
+            { firebaseUid },
+            { $set: { password: hashedPassword } }
+        );
+
+        return res.status(200).json(
+            new ApiResponse(200, {}, translations[lang]?.success_user_password_changed || "success_user_password_changed")
+        );
+    } catch (error) {
+        console.error("Error changing password:", error);
+        return translateErrorResponse(res, lang, "error_user_change_password_failed", 500, translations);
+    }
+});
+
 const deleteUser = asyncHandler( async (req, res) => {
     const { userId } = req.params; 
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
@@ -1211,6 +1248,7 @@ export {
     registerUser,
     updateUser,
     deleteUser,
+    changePassword,
     loginUser,
     verifyIdToken,
     logoutUser,
