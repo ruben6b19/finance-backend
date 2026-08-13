@@ -451,15 +451,6 @@ const changePassword = asyncHandler(async (req, res) => {
             password: newPassword
         });
 
-        // 2. Actualizar en MongoDB (opcional si no guardas pass hash, pero buena práctica si lo haces)
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-        await User.findOneAndUpdate(
-            { firebaseUid },
-            { $set: { password: hashedPassword } }
-        );
-
         return res.status(200).json(
             new ApiResponse(200, {}, translations[lang]?.success_user_password_changed || "success_user_password_changed")
         );
