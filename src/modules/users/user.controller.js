@@ -433,7 +433,7 @@ const updateUserfirebase = asyncHandler( async (req, res) => {
 });
 
 const changePassword = asyncHandler(async (req, res) => {
-    const lang = getLang(req);
+    const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
     const { newPassword } = req.body;
     const firebaseUid = req.user?.firebaseUid;
 
