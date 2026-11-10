@@ -1,0 +1,5 @@
+{
+    "error_expiry_sweep_forbidden": "Only an administrator or supervisor can run the expiry sweep.",
+    "success_expiry_sweep": "Expiry sweep executed successfully.",
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

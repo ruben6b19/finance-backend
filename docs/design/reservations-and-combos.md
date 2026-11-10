@@ -1,7 +1,7 @@
 # Design: Reservations & Combo Vouchers
 
-Status: **in implementation** — D1, D1a, D2, D4, D8 resolved. Section 13 tracks the build order.
-Scope: data model plus the modules that implement build-order steps 1–6.
+Status: **in implementation** — D1, D1a, D2, D4, D5, D8 resolved. Section 13 tracks the build order.
+Scope: data model plus the modules that implement build-order steps 1–7.
 
 ---
 
@@ -492,12 +492,19 @@ administrative correction, not an operator action, so it mirrors reservation voi
 is mandatory and recorded on the append-only row (`voidedAt`, `voidedBy`,
 `voidReason`).
 
+**D5 — Voucher expiry policy (resolved: per-combo fixed days with a grace window).**
+
+Each combo sets its own `validityDays` (`0` = never expires) plus `graceDays`.
+The grace window is frozen on the voucher at purchase time, so editing the
+definition later never rewrites an already-sold voucher. The step-7 sweep closes
+only vouchers strictly past `expiresAt + graceDays`, matching the redemption
+window. The fiscal-period-end option is out of scope.
+
 ### Still open
 
 | # | Decision | Options | Impact |
 | --- | --- | --- | --- |
 | D3 | Can a combo item be substituted | no / within same category | `allowSubstitution` becomes real logic |
-| D5 | Voucher expiry policy | never / fixed days / fiscal-period end | `validityDays`, sweep job |
 | D6 | Can a voucher be transferred to another person | no / yes | `customerPhone` becomes mutable, needs history |
 | D7 | No-show courtesy | none / credit toward a future purchase | D1 rules out cash refunds; a credit needs a linked voucher. Does not block step 1 |
 
@@ -505,7 +512,7 @@ is mandatory and recorded on the append-only row (`voidedAt`, `voidedBy`,
 
 ## 13. Build order
 
-Status: **1, 2, 3, 4, 5 and 6 implemented and runtime-verified** against a scratch database.
+Status: **1–7 implemented and runtime-verified** against a scratch database.
 
 1. ✅ **SaleItem `stockProduct` + `conversionFactor`** and the reversal-filter fix.
    Nothing else works before this, and it is useful on its own.
@@ -559,7 +566,17 @@ Status: **1, 2, 3, 4, 5 and 6 implemented and runtime-verified** against a scrat
    - `GET /api/v1/combo-purchases/reconciliation` is a read-only report that
      compares each voucher balance with its non-voided redemptions and checks the
      denormalized totals and the exhausted/active status. It never repairs.
-7. Expiry sweeps for both reservations and vouchers.
+7. ✅ **Expiry sweeps for both reservations and vouchers.**
+   - `expireReservations` and `expireComboVouchers` live in
+     `src/modules/maintenance/expiry.service.js`; both only move `status 0` → `2`
+     and never touch stock, `Transaction` or `Sale`.
+   - `POST /api/v1/maintenance/expiry-sweep` is admin/supervisor only (sellers get
+     `403`) and accepts `dryRun` to report what would expire without writing.
+   - Vouchers expire only strictly past `expiresAt + graceDays`, matching the
+     redemption window, and set `closedAt`.
+   - Sweeps are idempotent: a second run expires nothing.
+   - `scripts/expire-stale.js` (`npm run expire:stale`) exposes the same sweep to
+     cron, with `--dry-run`.
 
 ---
 

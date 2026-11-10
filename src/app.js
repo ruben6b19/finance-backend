@@ -64,6 +64,7 @@ import reservationRouter from './modules/reservations/reservation.routes.js';
 import comboRouter from './modules/combos/combo.routes.js';
 import comboPurchaseRouter from './modules/combos/comboPurchase.routes.js';
 import stockAdjustmentRouter from './modules/stockAdjustments/stockAdjustment.routes.js';
+import maintenanceRouter from './modules/maintenance/expirySweep.routes.js';
 //import profileRouter from './modules/profiles/profile.routes.js';
 //import accountRouter from './modules/accounts/account.routes.js';
 //import netflixRouter from './modules/netflix/netflix.routes.js';
@@ -82,6 +83,7 @@ app.use("/api/v1/reservations", reservationRouter)
 app.use("/api/v1/combos", comboRouter)
 app.use("/api/v1/combo-purchases", comboPurchaseRouter)
 app.use("/api/v1/stock-adjustments", stockAdjustmentRouter)
+app.use("/api/v1/maintenance", maintenanceRouter)
 //app.use("/api/v1/profiles", profileRouter);
 //app.use("/api/v1/accounts", accountRouter);
 //app.use("/api/v1/netflix", netflixRouter)

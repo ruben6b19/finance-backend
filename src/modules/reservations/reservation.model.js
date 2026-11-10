@@ -156,6 +156,8 @@ const reservationSchema = new Schema(
   }
 );
 
+reservationSchema.index({ status: 1, expiresAt: 1 });
+
 reservationSchema.plugin(mongoosePaginate);
 reservationSchema.plugin(aggregatePaginate);
 

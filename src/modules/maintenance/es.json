@@ -1,0 +1,5 @@
+{
+    "error_expiry_sweep_forbidden": "Solo un administrador o supervisor puede ejecutar el barrido de vencimientos.",
+    "success_expiry_sweep": "Barrido de vencimientos ejecutado correctamente.",
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

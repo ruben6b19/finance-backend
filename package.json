@@ -8,6 +8,7 @@
     "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js",
     "start": "node src/index.js",
     "seed:pollo": "node scripts/seed-pollo-product.js",
+    "expire:stale": "node scripts/expire-stale.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest"
   },
   "keywords": [
