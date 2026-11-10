@@ -62,11 +62,13 @@ stock by themselves; they only instruct what a later `Sale`/redemption must do.
 
 ## 3. Product (existing — changes)
 
+Implemented in build-order step 3.
+
 | Change | Detail |
 | --- | --- |
 | `productType` enum | `[0, 1, 2]` → `[0, 1, 2, 3]`. `3 = Combo`. |
-| `isSellable` / `isPurchasable` | `createProduct` must add a branch: type 3 → sellable `true`, purchasable `false`. |
-| Stock | A combo product holds **no stock of its own**. Its availability is its components'. |
+| `isSellable` / `isPurchasable` | `createProduct` and `updateProduct` force type 3 → sellable `true`, purchasable `false`. |
+| Stock | A combo product holds **no stock of its own**. Its availability is its components'. `applyStockMovement` skips decrement for type 3 unless the item explicitly sets `stockProduct`. |
 
 `0 = input/raw`, `1 = final/menu`, `2 = direct resale`, `3 = combo/bundle`.
 
@@ -156,11 +158,23 @@ What the combo includes. One row per included product.
 | `product` | ObjectId → Product | the component as the customer knows it (`"Pollo entero"`) |
 | `quantity` | Number | decimals allowed (`5` chickens, `0.25` for a quarter) |
 | `label` | String | display text |
-| `stockProduct` | ObjectId → Product | **`null` = this component does not touch inventory** |
-| `conversionFactor` | Number | stock units consumed per `quantity` (e.g. `8` presas per chicken) |
+| `stockProduct` | ObjectId → Product | stock accumulator this component draws from |
+| `conversionFactor` | Number | stock units consumed per component unit (e.g. `8` presas per chicken) |
 
-`stockProduct: null` is how chicken components stay out of inventory while bottle
-components do hit stock. No separate boolean needed.
+Chicken components are **not** stockless. A combo that includes `1 pollo entero`
+sets `product: "Pollo entero"` (the presentation the customer sees) with
+`stockProduct: "Pollo (presa)"` and `conversionFactor: 8`, so redeeming it draws
+8 presas from the accumulator. `stockProduct: null` is reserved for components
+that genuinely do not touch inventory.
+
+Constraints enforced by the catalogue:
+
+- `{ combo, product }` is **unique**: a product cannot appear twice in one combo,
+  otherwise per-product balances would be ambiguous.
+- A component cannot itself have `productType: 3` (no nested combos): recursion
+  would make both pricing and stock consumption undefined.
+- `referencePrice` is `Σ(quantity × component price)` from the catalogue at write
+  time; it is informative only and never charged.
 
 ---
 
@@ -305,7 +319,7 @@ Reservation       { code } unique
 
 ComboDefinition   { product } unique
 
-ComboComponent    { combo }
+ComboComponent    { combo, product } unique
 
 ComboPurchase     { code } unique
                   { status, expiresAt }
@@ -397,7 +411,7 @@ the existing `Product.stock`. Production planning is out of scope.
 
 ## 13. Build order
 
-Status: **1 and 2 implemented and runtime-verified** against a scratch database.
+Status: **1, 2 and 3 implemented and runtime-verified** against a scratch database.
 
 1. ✅ **SaleItem `stockProduct` + `conversionFactor`** and the reversal-filter fix.
    Nothing else works before this, and it is useful on its own.
@@ -412,7 +426,14 @@ Status: **1 and 2 implemented and runtime-verified** against a scratch database.
    `POST /reservations/:id/void`.
    - Prices come from `Product.price`, never from the client.
    - `code` is derived from the reservation `_id`, so it is unique without retries.
-3. **ComboDefinition + ComboComponent** (catalogue; nothing to sell yet).
+3. ✅ **ComboDefinition + ComboComponent** (catalogue; nothing to sell yet).
+   Endpoints: `POST /combos`, `GET /combos`, `GET /combos/:comboId`,
+   `PUT|PATCH /combos/:comboId`.
+   - A combo product is `productType: 3` and holds no stock of its own; selling
+     one moves no inventory until redemptions exist.
+   - Components are validated and their `referencePrice` recomputed on every
+     write. Replacing components never rewrites vouchers already sold.
+   - One definition per combo product, no nested combos, no duplicate components.
 4. **ComboPurchase creation inside `createSale`**.
 5. **ComboRedemption** with idempotency and conditional decrement.
 6. **StockAdjustment** + reconciliation check.
