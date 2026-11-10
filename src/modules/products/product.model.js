@@ -19,10 +19,11 @@ const productSchema = new Schema(
     // 0: Insumo / Materia Prima (ej. Arroz, Pollo Entero, Aceite)
     // 1: Producto Final / Menú (ej. 1/4 de Pollo, Porción de Papas)
     // 2: Producto Directo / Reventa (ej. Gaseosa 2L, Cerveza)
+    // 3: Combo / Paquete (sin stock propio: su disponibilidad es la de sus componentes)
     productType: {
       type: Number,
       required: true,
-      enum: [0, 1, 2],
+      enum: [0, 1, 2, 3],
       default: 1,
       index: true
     },

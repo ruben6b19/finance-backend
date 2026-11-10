@@ -37,6 +37,9 @@ const createProduct = asyncHandler(async (req, res) => {
     } else if (type === 2) { // Directo
         finalIsSellable = true;
         finalIsPurchasable = true;
+    } else if (type === 3) { // Combo
+        finalIsSellable = true;
+        finalIsPurchasable = false;
     }
 
     if (!name || !name.trim()) {
@@ -205,6 +208,7 @@ const updateProduct = asyncHandler(async (req, res) => {
         if (type === 0) { updateFields.isSellable = false; updateFields.isPurchasable = true; }
         else if (type === 1) { updateFields.isSellable = true; updateFields.isPurchasable = false; }
         else if (type === 2) { updateFields.isSellable = true; updateFields.isPurchasable = true; }
+        else if (type === 3) { updateFields.isSellable = true; updateFields.isPurchasable = false; }
     }
     // Si no se cambia el tipo, pero se envían casillas, usarlas (opcional, pero las reglas anteriores mandan)
     if (isSellable !== undefined && productType === undefined) updateFields.isSellable = isSellable;

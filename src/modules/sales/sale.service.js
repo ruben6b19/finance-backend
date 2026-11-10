@@ -7,6 +7,7 @@ import { TransactionCategory } from "../transactionCategories/transactionCategor
 // Productos con inventario real: insumos (0) y reventa (2).
 // Los productos de menú (1) no se controlan por stock, igual que antes.
 const STOCK_TRACKED_PRODUCT_TYPES = [0, 2];
+const COMBO_PRODUCT_TYPE = 3;
 
 const stockTargetId = (item) => item.stockProduct || item.product;
 
@@ -37,6 +38,17 @@ export const applyStockMovement = async (items, session, direction) => {
             throw new Error("INVALID_STOCK_AMOUNT");
         }
 
+        const target = await Product.findById(targetId).session(session);
+        if (!target) {
+            throw new Error("STOCK_PRODUCT_NOT_FOUND");
+        }
+
+        // Un combo no tiene stock propio: su disponibilidad es la de sus
+        // componentes, que descuentan al canjearse (ComboRedemption).
+        if (!item.stockProduct && target.productType === COMBO_PRODUCT_TYPE) {
+            continue;
+        }
+
         if (direction > 0) {
             await Product.updateOne(
                 { _id: targetId },
@@ -44,11 +56,6 @@ export const applyStockMovement = async (items, session, direction) => {
                 { session }
             );
             continue;
-        }
-
-        const target = await Product.findById(targetId).session(session);
-        if (!target) {
-            throw new Error("STOCK_PRODUCT_NOT_FOUND");
         }
 
         const tracksStock = Boolean(item.stockProduct) ||
