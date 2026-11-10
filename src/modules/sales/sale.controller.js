@@ -8,6 +8,7 @@ import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
 import { applyStockMovement, createSaleRecord, STOCK_ERROR_CODES } from "./sale.service.js";
+import { cancelComboVouchersForSale, COMBO_VOUCHER_ERROR_CODES } from "../combos/comboPurchase.service.js";
 
 const translations = {
     es: esTranslations,
@@ -20,7 +21,7 @@ const getLang = (req) => {
 
 const createSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const { saleNumber, customerName, customerId, items, subtotal, tax, discount, totalAmount, paymentMethod, paymentStatus, saleStatus, saleDate, transactionCategory, notes } = req.body;
+    const { saleNumber, customerName, customerPhone, customerId, items, subtotal, tax, discount, totalAmount, paymentMethod, paymentStatus, saleStatus, saleDate, transactionCategory, notes } = req.body;
 
     if (totalAmount === undefined) {
         return translateErrorResponse(res, lang, "error_sale_required_fields", 400, translations);
@@ -63,6 +64,7 @@ const createSale = asyncHandler(async (req, res) => {
             payload: {
                 saleNumber,
                 customerName,
+                customerPhone,
                 customerId,
                 items: items || [],
                 subtotal,
@@ -83,17 +85,29 @@ const createSale = asyncHandler(async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
+        // toJSON solo serializa rutas del schema, así que los vouchers (propiedad
+        // no persistida) se agregan acá para que el POS reciba sus códigos.
+        const responseData = createdSale.toObject();
+        if (createdSale.comboVouchers?.length) {
+            responseData.comboVouchers = createdSale.comboVouchers.map((voucher) =>
+                voucher.toObject ? voucher.toObject() : voucher
+            );
+        }
+
         return res.status(201).json(
-            new ApiResponse(201, createdSale, translations[lang]?.success_sale_created || "success_sale_created")
+            new ApiResponse(201, responseData, translations[lang]?.success_sale_created || "success_sale_created")
         );
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
         console.error("Error creating sale:", error);
 
-        const stockErrorCode = STOCK_ERROR_CODES[error?.message];
-        if (stockErrorCode) {
-            return translateErrorResponse(res, lang, stockErrorCode, 400, translations);
+        const errorCode = {
+            ...STOCK_ERROR_CODES,
+            ...COMBO_VOUCHER_ERROR_CODES
+        }[error?.message];
+        if (errorCode) {
+            return translateErrorResponse(res, lang, errorCode, 400, translations);
         }
 
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
@@ -349,7 +363,19 @@ const deleteSale = asyncHandler(async (req, res) => {
             );
         }
 
-        // 3. ELIMINACIÓN DEL REGISTRO DE VENTA
+        // 3. ANULACIÓN DE VOUCHERS DE COMBO
+        try {
+            await cancelComboVouchersForSale({ saleId, session });
+        } catch (voucherError) {
+            if (voucherError?.message === "COMBO_ALREADY_REDEEMED") {
+                await session.abortTransaction();
+                session.endSession();
+                return translateErrorResponse(res, lang, "error_sale_combo_already_redeemed", 400, translations);
+            }
+            throw voucherError;
+        }
+
+        // 4. ELIMINACIÓN DEL REGISTRO DE VENTA
         await Sale.findByIdAndDelete(saleId, { session });
 
         await session.commitTransaction();
@@ -470,6 +496,19 @@ const cancelSale = asyncHandler(async (req, res) => {
       await session.abortTransaction();
       session.endSession();
       return translateErrorResponse(res, lang, "error_sale_already_cancelled", 400, translations);
+    }
+
+    // Anular la venta también cancela sus vouchers de combo, salvo que alguno
+    // ya haya sido canjeado: en ese caso la operación completa se rechaza.
+    try {
+      await cancelComboVouchersForSale({ saleId, session });
+    } catch (voucherError) {
+      if (voucherError?.message === "COMBO_ALREADY_REDEEMED") {
+        await session.abortTransaction();
+        session.endSession();
+        return translateErrorResponse(res, lang, "error_sale_combo_already_redeemed", 400, translations);
+      }
+      throw voucherError;
     }
 
     sale.saleStatus = 2;

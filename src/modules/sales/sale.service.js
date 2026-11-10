@@ -3,6 +3,7 @@ import { Sale } from "./sale.model.js";
 import { Product } from "../products/product.model.js";
 import { Transaction } from "../transactions/transaction.model.js";
 import { TransactionCategory } from "../transactionCategories/transactionCategory.model.js";
+import { issueComboVouchers } from "../combos/comboPurchase.service.js";
 
 // Productos con inventario real: insumos (0) y reventa (2).
 // Los productos de menú (1) no se controlan por stock, igual que antes.
@@ -97,7 +98,8 @@ const resolveCategoryId = async (categoryId, session) => {
 };
 
 /**
- * Crea una venta completa: Sale + movimiento de stock + Transaction.
+ * Crea una venta completa: Sale + movimiento de stock + Transaction + vouchers
+ * de combo (uno por unidad vendida cuando la venta incluye productos tipo 3).
  * Es el único camino por el que se crea una venta, para que el POS, las
  * reservas y los combos compartan exactamente las mismas reglas.
  *
@@ -109,12 +111,14 @@ const resolveCategoryId = async (categoryId, session) => {
  * @param {mongoose.ClientSession} params.session  Sesión activa.
  * @param {object} [params.transactionExtra]  Campos extra para la Transaction
  *        (por ejemplo `reservationId`).
- * @returns {Promise<object>} La venta creada.
+ * @returns {Promise<object>} La venta creada; `comboVouchers` queda adjunto
+ *          como propiedad no persistida.
  */
 export const createSaleRecord = async ({ payload, userId, session, transactionExtra = {} }) => {
     const {
         saleNumber,
         customerName,
+        customerPhone,
         customerId = null,
         items = [],
         subtotal,
@@ -174,6 +178,23 @@ export const createSaleRecord = async ({ payload, userId, session, transactionEx
 
     createdSale.transactionId = transaction[0]._id;
     await createdSale.save({ session });
+
+    // VOUCHERS DE COMBO
+    // Los combos no mueven stock: cada unidad vendida emite un voucher con su
+    // saldo de componentes congelado.
+    const comboVouchers = await issueComboVouchers({
+        items,
+        customerName,
+        customerPhone,
+        customerId,
+        sale: createdSale,
+        purchasedAt: effectiveDate,
+        paymentStatus,
+        saleStatus,
+        userId,
+        session
+    });
+    createdSale.comboVouchers = comboVouchers;
 
     return createdSale;
 };

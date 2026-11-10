@@ -180,7 +180,8 @@ Constraints enforced by the catalogue:
 
 ## 6. ComboPurchase (new) — the voucher
 
-Created by the sale that paid for it. Holds the **live balance**.
+Implemented in build-order step 4. Created by the sale that paid for it.
+Holds the **live balance**.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -213,6 +214,40 @@ Created by the sale that paid for it. Holds the **live balance**.
 
 Copying `stockProduct`/`conversionFactor` **freezes the terms**: editing a combo
 later never rewrites an already-sold voucher.
+
+### Issuance rules (implemented)
+
+`createSale` is the only issuance path, and it issues automatically:
+
+- One voucher per sold unit of a `productType 3` item. Selling 2 combos emits 2
+  vouchers, each with its own `code`.
+- `code` is the last 8 hex characters of the voucher `_id`, uppercased — unique
+  by construction, like reservation codes.
+- `pricePaid` is the **charged unit price** of the sale item, not
+  `referencePrice`. A voucher is never repriced later.
+- `purchasedAt` is the sale's effective date; `expiresAt` is
+  `purchasedAt + validityDays`, or `null` when `validityDays` is `0`.
+- `customerPhone` is required on the sale request whenever it contains a combo
+  item: an operator-facing voucher cannot be issued without a contact. All
+  vouchers in one sale share the sale's `customerName`, `customerPhone` and
+  `customerId`.
+- The sale must be fully paid (`paymentStatus 1`); pending payment never emits
+  an entitlement. Cancelled sales (`saleStatus 2`) emit nothing.
+- The combo definition must exist and be `status 1`. Selling a withdrawn combo
+  is rejected rather than issuing vouchers under an offer no longer honoured.
+- Combo quantities are integers. Fractional combo units are rejected.
+- Any failure aborts the whole transaction: no Sale, no Transaction, no stock
+  movement and no voucher survive a rejected issuance.
+
+Cancelling or deleting such a sale sets its vouchers to `status 3` with
+`closedAt`. If any voucher already has `usedUnits > 0`, the cancellation is
+rejected: the goods already left inventory, so the sale can no longer be
+reversed cleanly.
+
+Known v1 limits: vouchers are not reconciled when `updateSale` rewrites items,
+and there are no voucher read/redeem endpoints until step 5. One sale is one
+customer for voucher purposes; selling combos to several customers requires
+separate sales.
 
 ### Suggested denomination
 
@@ -303,6 +338,10 @@ Fixes today's unaudited `PUT /products/:id { stock }` overwrite.
 | Redeem a combo | — | — | **only if** component has `stockProduct` | balance +, `ComboRedemption` |
 | Void a redemption | — | — | restored | balance −, redemption voided |
 | Cancel a combo sale | reversal | reversal | reversal | `ComboPurchase` → 3 |
+
+Cancelling a combo sale is refused when any of its vouchers has already been
+redeemed (`usedUnits > 0`). Redemptions move component stock, and silently
+reversing a partially consumed voucher would fabricate inventory.
 
 ---
 
@@ -411,7 +450,7 @@ the existing `Product.stock`. Production planning is out of scope.
 
 ## 13. Build order
 
-Status: **1, 2 and 3 implemented and runtime-verified** against a scratch database.
+Status: **1, 2, 3 and 4 implemented and runtime-verified** against a scratch database.
 
 1. ✅ **SaleItem `stockProduct` + `conversionFactor`** and the reversal-filter fix.
    Nothing else works before this, and it is useful on its own.
@@ -434,7 +473,14 @@ Status: **1, 2 and 3 implemented and runtime-verified** against a scratch databa
    - Components are validated and their `referencePrice` recomputed on every
      write. Replacing components never rewrites vouchers already sold.
    - One definition per combo product, no nested combos, no duplicate components.
-4. **ComboPurchase creation inside `createSale`**.
+4. ✅ **ComboPurchase creation inside `createSale`**.
+   - Issued automatically by `createSale` through
+     `issueComboVouchers`, inside the same Mongo session as the Sale and the
+     Transaction; the response exposes the vouchers as `data.comboVouchers`.
+   - `customerPhone` is required on the request for any sale containing a combo
+     item, and the sale must be fully paid.
+   - Cancelling or deleting the sale cancels its vouchers, unless one was
+     already redeemed.
 5. **ComboRedemption** with idempotency and conditional decrement.
 6. **StockAdjustment** + reconciliation check.
 7. Expiry sweeps for both reservations and vouchers.
