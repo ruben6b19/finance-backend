@@ -1,0 +1,21 @@
+{
+    "error_combo_product_required": "The combo product is required.",
+    "error_combo_product_not_found": "The combo product does not exist.",
+    "error_combo_product_not_combo_type": "The specified product is not a combo product (type 3).",
+    "error_combo_already_exists": "That product already has a combo definition.",
+    "error_combo_components_required": "The combo must include at least one component.",
+    "error_combo_component_product_not_found": "One or more combo components do not exist.",
+    "error_combo_component_is_combo": "A component cannot itself be a combo.",
+    "error_combo_duplicate_component": "A product cannot appear twice in the same combo.",
+    "error_combo_invalid_quantity": "The quantity or conversion factor of a component is invalid.",
+    "error_combo_invalid_validity": "Validity and grace days must be integers greater than or equal to zero.",
+    "error_combo_invalid_status": "Combo status is invalid. Must be 0 (Inactive) or 1 (Active).",
+    "error_combo_invalid_id": "The provided combo ID is invalid.",
+    "error_combo_not_found": "Combo not found.",
+    "error_combo_no_fields_update": "At least one valid field must be provided to update.",
+    "error_internal_server_generic": "An unexpected error occurred on the server.",
+    "success_combo_created": "Combo created successfully.",
+    "success_combos_fetched": "Combos fetched successfully.",
+    "success_combo_fetched": "Combo fetched successfully.",
+    "success_combo_updated": "Combo updated successfully."
+}

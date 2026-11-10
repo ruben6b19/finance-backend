@@ -1,0 +1,21 @@
+{
+    "error_combo_product_required": "El producto del combo es obligatorio.",
+    "error_combo_product_not_found": "El producto del combo no existe.",
+    "error_combo_product_not_combo_type": "El producto indicado no es de tipo combo (3).",
+    "error_combo_already_exists": "Ese producto ya tiene un combo definido.",
+    "error_combo_components_required": "El combo debe incluir al menos un componente.",
+    "error_combo_component_product_not_found": "Uno o más componentes del combo no existen.",
+    "error_combo_component_is_combo": "Un componente no puede ser a su vez un combo.",
+    "error_combo_duplicate_component": "Un producto no puede repetirse en el mismo combo.",
+    "error_combo_invalid_quantity": "La cantidad o el factor de conversión de un componente no es válido.",
+    "error_combo_invalid_validity": "La vigencia y los días de gracia deben ser enteros mayores o iguales a cero.",
+    "error_combo_invalid_status": "El estado del combo no es válido. Debe ser 0 (Inactivo) o 1 (Activo).",
+    "error_combo_invalid_id": "El ID del combo proporcionado no es válido.",
+    "error_combo_not_found": "Combo no encontrado.",
+    "error_combo_no_fields_update": "Se debe proporcionar al menos un campo válido para actualizar.",
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor.",
+    "success_combo_created": "Combo creado correctamente.",
+    "success_combos_fetched": "Combos obtenidos correctamente.",
+    "success_combo_fetched": "Combo obtenido correctamente.",
+    "success_combo_updated": "Combo actualizado correctamente."
+}
