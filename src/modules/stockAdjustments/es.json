@@ -1,0 +1,16 @@
+{
+    "error_stock_adjustment_forbidden": "Solo un administrador o supervisor puede ajustar el stock.",
+    "error_stock_adjustment_invalid_product": "El ID del producto proporcionado no es válido.",
+    "error_stock_adjustment_amount_required": "Indique newStock o delta, pero no ambos.",
+    "error_stock_adjustment_invalid_amount": "El ajuste de stock no es válido.",
+    "error_stock_adjustment_invalid_reason": "El motivo del ajuste no es válido.",
+    "error_stock_adjustment_product_not_found": "Producto no encontrado.",
+    "error_stock_adjustment_combo_product": "Los combos no tienen stock propio; ajuste sus componentes.",
+    "error_stock_adjustment_negative_stock": "El ajuste dejaría el stock en negativo.",
+    "error_stock_adjustment_conflict": "El stock del producto fue modificado por otra operación; reintente.",
+
+    "success_stock_adjustment_created": "Ajuste de stock registrado correctamente.",
+    "success_stock_adjustments_fetched": "Ajustes de stock obtenidos correctamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

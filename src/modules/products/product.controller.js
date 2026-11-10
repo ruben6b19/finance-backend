@@ -161,22 +161,27 @@ const updateProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const { productId } = req.params;
 
-    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
-        return translateErrorResponse(res, lang, "error_product_invalid_id", 400, translations);
-    }
-
     const {
         name, description, price, costPrice, stock, category,
         sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
         isSellable, isPurchasable
     } = req.body;
 
+    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
+        return translateErrorResponse(res, lang, "error_product_invalid_id", 400, translations);
+    }
+
+    // El stock ya no se sobrescribe desde la edición del producto: todo cambio
+    // manual pasa por un ajuste auditado.
+    if (stock !== undefined) {
+        return translateErrorResponse(res, lang, "error_product_stock_requires_adjustment", 400, translations);
+    }
+
     if (
         name === undefined &&
         description === undefined &&
         price === undefined &&
         costPrice === undefined &&
-        stock === undefined &&
         category === undefined &&
         sku === undefined &&
         unit === undefined &&
@@ -197,7 +202,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     if (description !== undefined) updateFields.description = description ? description.trim() : '';
     if (price !== undefined) updateFields.price = Number(price);
     if (costPrice !== undefined) updateFields.costPrice = Number(costPrice);
-    if (stock !== undefined) updateFields.stock = Number(stock);
     if (category !== undefined) updateFields.category = category || null;
     if (unit !== undefined) updateFields.unit = unit || null;
     if (purchaseUnit !== undefined) updateFields.purchaseUnit = purchaseUnit || null;

@@ -548,10 +548,141 @@ const voidRedemption = asyncHandler(async (req, res) => {
     }
 });
 
+const getVoucherReconciliation = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const MAX_REPORTED = 200;
+    const TOLERANCE = 1e-6;
+
+    try {
+        // Lectura completa: el reporte no repara nada, solo detecta desvíos.
+        const vouchers = await ComboPurchase.find({}, {
+            code: 1,
+            status: 1,
+            balances: 1,
+            usedUnits: 1,
+            totalUnits: 1
+        }).lean();
+
+        // Una sola pasada sobre los canjes vigentes (los anulados no cuentan).
+        const totals = await ComboRedemption.aggregate([
+            { $match: { voidedAt: null } },
+            { $unwind: '$items' },
+            {
+                $group: {
+                    _id: { voucher: '$comboPurchase', product: '$items.product' },
+                    total: { $sum: '$items.quantity' }
+                }
+            }
+        ]);
+
+        const redemptionTotals = new Map();
+        for (const row of totals) {
+            redemptionTotals.set(`${row._id.voucher}:${row._id.product}`, toNumber(row.total));
+        }
+
+        const driftVouchers = [];
+
+        for (const voucher of vouchers) {
+            const issues = [];
+            const balances = voucher.balances || [];
+
+            let includedSum = 0;
+            let usedSum = 0;
+
+            for (const balance of balances) {
+                const includedQty = toNumber(balance.includedQty);
+                const usedQty = toNumber(balance.usedQty);
+                includedSum += includedQty;
+                usedSum += usedQty;
+
+                // Invariante 2: el saldo gastado debe coincidir con los canjes.
+                const redeemedQty = redemptionTotals.get(`${voucher._id}:${balance.product}`) || 0;
+                if (Math.abs(redeemedQty - usedQty) > TOLERANCE) {
+                    issues.push({
+                        type: 'balance_mismatch',
+                        product: balance.product,
+                        expectedUsedQty: round6(redeemedQty),
+                        actualUsedQty: round6(usedQty)
+                    });
+                }
+            }
+
+            const storedUsedUnits = toNumber(voucher.usedUnits);
+            const storedTotalUnits = toNumber(voucher.totalUnits);
+
+            // Invariante 4: los totales denormalizados reflejan los saldos.
+            if (Math.abs(usedSum - storedUsedUnits) > TOLERANCE) {
+                issues.push({
+                    type: 'used_units_mismatch',
+                    expected: round6(usedSum),
+                    actual: round6(storedUsedUnits)
+                });
+            }
+
+            if (Math.abs(includedSum - storedTotalUnits) > TOLERANCE) {
+                issues.push({
+                    type: 'total_units_mismatch',
+                    expected: round6(includedSum),
+                    actual: round6(storedTotalUnits)
+                });
+            }
+
+            // Invariante 3: solo aplica a activos (0) y agotados (1).
+            const status = Number(voucher.status);
+            if (status === 1 && storedUsedUnits < storedTotalUnits - 1e-9) {
+                issues.push({
+                    type: 'status_mismatch',
+                    expectedStatus: 0,
+                    actualStatus: 1,
+                    usedUnits: round6(storedUsedUnits),
+                    totalUnits: round6(storedTotalUnits)
+                });
+            }
+
+            if (status === 0 && storedUsedUnits >= storedTotalUnits - 1e-9) {
+                issues.push({
+                    type: 'status_mismatch',
+                    expectedStatus: 1,
+                    actualStatus: 0,
+                    usedUnits: round6(storedUsedUnits),
+                    totalUnits: round6(storedTotalUnits)
+                });
+            }
+
+            if (issues.length > 0) {
+                driftVouchers.push({
+                    comboPurchase: voucher._id,
+                    code: voucher.code,
+                    issues
+                });
+            }
+        }
+
+        const truncated = driftVouchers.length > MAX_REPORTED;
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                {
+                    checked: vouchers.length,
+                    driftCount: driftVouchers.length,
+                    truncated,
+                    vouchers: truncated ? driftVouchers.slice(0, MAX_REPORTED) : driftVouchers
+                },
+                translations[lang]?.success_voucher_reconciliation || "success_voucher_reconciliation"
+            )
+        );
+    } catch (error) {
+        console.error("Error reconciling combo vouchers:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
 export {
     getComboPurchases,
     getComboPurchaseById,
     getComboPurchaseRedemptions,
     createRedemption,
-    voidRedemption
+    voidRedemption,
+    getVoucherReconciliation
 };

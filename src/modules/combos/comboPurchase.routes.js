@@ -4,7 +4,8 @@ import {
     getComboPurchaseById,
     getComboPurchaseRedemptions,
     createRedemption,
-    voidRedemption
+    voidRedemption,
+    getVoucherReconciliation
 } from "./comboPurchase.controller.js";
 import { verifyFirebaseToken } from "../../middlewares/auth.middleware.js";
 
@@ -17,6 +18,10 @@ router.route("/all/:page").get(getComboPurchases);
 
 router.route("/")
     .get(getComboPurchases);
+
+// Debe declararse antes de "/:comboPurchaseId" para no interpretarse como un código.
+router.route("/reconciliation")
+    .get(getVoucherReconciliation);
 
 router.route("/:comboPurchaseId/redemptions")
     .get(getComboPurchaseRedemptions)

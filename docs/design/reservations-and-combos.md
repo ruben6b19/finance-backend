@@ -1,7 +1,7 @@
 # Design: Reservations & Combo Vouchers
 
 Status: **in implementation** — D1, D1a, D2, D4, D8 resolved. Section 13 tracks the build order.
-Scope: data model plus the modules that implement build-order steps 1–5.
+Scope: data model plus the modules that implement build-order steps 1–6.
 
 ---
 
@@ -359,6 +359,19 @@ Fixes today's unaudited `PUT /products/:id { stock }` overwrite.
 | `operator` | ObjectId → User | |
 | `createdAt` | Date | via `timestamps` |
 
+**Rules (implemented)**
+
+- Creation is restricted to admin (`0`) and supervisor (`1`); sellers get `403`.
+- The request carries exactly one of `newStock` (absolute) or `delta` (signed);
+  the resulting stock may never be negative.
+- The update is CAS-guarded on the previously read stock, so concurrent
+  adjustments cannot overwrite each other.
+- Combo products (`productType 3`) are rejected: they have no stock of their own.
+- `PUT|PATCH /products/:id` no longer accepts `stock`; it returns `400` and points
+  the caller at a stock adjustment.
+- Endpoints: `POST|GET /api/v1/stock-adjustments` and
+  `GET /api/v1/combo-purchases/reconciliation` (read-only drift report).
+
 ---
 
 ## 9. What moves what
@@ -492,7 +505,7 @@ is mandatory and recorded on the append-only row (`voidedAt`, `voidedBy`,
 
 ## 13. Build order
 
-Status: **1, 2, 3, 4 and 5 implemented and runtime-verified** against a scratch database.
+Status: **1, 2, 3, 4, 5 and 6 implemented and runtime-verified** against a scratch database.
 
 1. ✅ **SaleItem `stockProduct` + `conversionFactor`** and the reversal-filter fix.
    Nothing else works before this, and it is useful on its own.
@@ -535,7 +548,17 @@ Status: **1, 2, 3, 4 and 5 implemented and runtime-verified** against a scratch 
    - Expiry honours the frozen `expiresAt` and `graceDays`.
    - Void is admin/supervisor only, requires a reason, restores stock and reopens
      an exhausted voucher.
-6. **StockAdjustment** + reconciliation check.
+6. ✅ **StockAdjustment** + reconciliation check.
+   - `POST /api/v1/stock-adjustments` records an audited manual stock change
+     (admin/supervisor only) using `newStock` or `delta`, CAS-guarded on the
+     previous stock; combo products are rejected.
+   - `GET /api/v1/stock-adjustments` lists adjustments with product and operator
+     populated, filtered by product and reason.
+   - `PUT|PATCH /api/v1/products/:id` rejects any `stock` field with `400`; stock
+     only changes through sales, purchases, redemptions and adjustments.
+   - `GET /api/v1/combo-purchases/reconciliation` is a read-only report that
+     compares each voucher balance with its non-voided redemptions and checks the
+     denormalized totals and the exhausted/active status. It never repairs.
 7. Expiry sweeps for both reservations and vouchers.
 
 ---

@@ -39,5 +39,6 @@
     "success_redemption_voided": "Canje anulado correctamente.",
     "success_combo_purchases_fetched": "Comprobantes de combo obtenidos correctamente.",
     "success_combo_purchase_fetched": "Comprobante de combo obtenido correctamente.",
-    "success_redemptions_fetched": "Canjes obtenidos correctamente."
+    "success_redemptions_fetched": "Canjes obtenidos correctamente.",
+    "success_voucher_reconciliation": "Reconciliación de vouchers obtenida correctamente."
 }

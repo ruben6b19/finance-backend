@@ -5,6 +5,7 @@
     "error_product_not_found": "Product not found.",
     "error_product_no_fields_update": "At least one valid field must be provided to update.",
     "error_product_duplicate_sku": "A product with this SKU already exists.",
+    "error_product_stock_requires_adjustment": "Stock is not changed when editing a product; record a stock adjustment.",
 
     "success_product_created": "Product created successfully.",
     "success_product_updated": "Product updated successfully.",

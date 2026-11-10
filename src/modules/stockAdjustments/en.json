@@ -1,0 +1,16 @@
+{
+    "error_stock_adjustment_forbidden": "Only an administrator or supervisor can adjust stock.",
+    "error_stock_adjustment_invalid_product": "Provided product ID is invalid.",
+    "error_stock_adjustment_amount_required": "Provide either newStock or delta, not both.",
+    "error_stock_adjustment_invalid_amount": "The stock adjustment is invalid.",
+    "error_stock_adjustment_invalid_reason": "The adjustment reason is invalid.",
+    "error_stock_adjustment_product_not_found": "Product not found.",
+    "error_stock_adjustment_combo_product": "Combos have no stock of their own; adjust their components.",
+    "error_stock_adjustment_negative_stock": "The adjustment would leave stock negative.",
+    "error_stock_adjustment_conflict": "The product stock was modified by another operation; please retry.",
+
+    "success_stock_adjustment_created": "Stock adjustment recorded successfully.",
+    "success_stock_adjustments_fetched": "Stock adjustments fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected error occurred on the server."
+}

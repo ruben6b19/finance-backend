@@ -39,5 +39,6 @@
     "success_redemption_voided": "Redemption voided successfully.",
     "success_combo_purchases_fetched": "Combo purchases fetched successfully.",
     "success_combo_purchase_fetched": "Combo purchase fetched successfully.",
-    "success_redemptions_fetched": "Redemptions fetched successfully."
+    "success_redemptions_fetched": "Redemptions fetched successfully.",
+    "success_voucher_reconciliation": "Voucher reconciliation fetched successfully."
 }
