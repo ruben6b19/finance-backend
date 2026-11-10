@@ -1,4 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
+import mongoosePaginate from 'mongoose-paginate-v2';
 
 // Saldo vivo de un componente del combo. Se congela al comprar el voucher:
 // editar el combo después nunca reescribe lo ya vendido.
@@ -88,6 +89,13 @@ const comboPurchaseSchema = new Schema(
       type: Date,
       default: null
     },
+    // Copiado al comprar el voucher: el vencimiento no consulta la definición,
+    // que puede cambiar después de la venta.
+    graceDays: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
     pricePaid: {
       type: Schema.Types.Decimal128,
       required: true
@@ -131,5 +139,7 @@ const comboPurchaseSchema = new Schema(
 comboPurchaseSchema.index({ status: 1, expiresAt: 1 });
 comboPurchaseSchema.index({ customerPhone: 1 });
 comboPurchaseSchema.index({ comboProduct: 1, purchasedAt: -1 });
+
+comboPurchaseSchema.plugin(mongoosePaginate);
 
 export const ComboPurchase = mongoose.model('ComboPurchase', comboPurchaseSchema);

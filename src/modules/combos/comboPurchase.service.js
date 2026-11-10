@@ -151,6 +151,7 @@ export const issueComboVouchers = async ({
                 customerId: customerId || null,
                 purchasedAt: purchaseDate,
                 expiresAt,
+                graceDays: Number(definition.graceDays) || 0,
                 pricePaid: unitPrice,
                 balances,
                 totalUnits,

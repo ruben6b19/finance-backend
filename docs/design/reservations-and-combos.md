@@ -1,7 +1,7 @@
 # Design: Reservations & Combo Vouchers
 
-Status: **approved for implementation** — D1, D1a, D2, D8 resolved. Section 13 defines the build order.
-Scope: data model only. No endpoints, no controllers, no migrations.
+Status: **in implementation** — D1, D1a, D2, D4, D8 resolved. Section 13 tracks the build order.
+Scope: data model plus the modules that implement build-order steps 1–5.
 
 ---
 
@@ -194,6 +194,7 @@ Holds the **live balance**.
 | `customerId` | ObjectId → User | no |
 | `purchasedAt` | Date | |
 | `expiresAt` | Date | `null` = never |
+| `graceDays` | Number | frozen copy of the definition's grace window |
 | `pricePaid` | Decimal128 | frozen |
 | `balances` | [ComboBalance] | live, authoritative |
 | `totalUnits` | Number | denormalised sum of `includedQty` |
@@ -285,6 +286,40 @@ One row per operator mark. Never updated, never deleted.
 
 The `idempotencyKey` is not optional. Without it a double-tap on the operator's
 screen hands out free product with no trace.
+
+### Redemption rules (implemented)
+
+Endpoints live under `/api/v1/combo-purchases`:
+
+- `GET /` (paginated), `GET /:idOrCode`, `GET /:idOrCode/redemptions`
+- `POST /:idOrCode/redemptions`
+- `POST /:idOrCode/redemptions/:redemptionId/void`
+
+`POST /redemptions` body:
+`{ idempotencyKey, items: [{ product, quantity }], notes? }`.
+
+- **Exact components only.** Each item must match a `balances[].product`. No
+  substitution (D3 stays "no" for v1).
+- **Idempotency is resolved first.** If a redemption with the same
+  `{comboPurchase, idempotencyKey}` exists and its items are equivalent, the
+  stored row is returned with `200` — even if that redemption exhausted the
+  voucher. Different content under the same key is `409`.
+- **Stock moves only when `balances[].stockProduct` is set**, by
+  `quantity × conversionFactor`, conditional on `stock >= amount`. Components
+  with `stockProduct: null` never touch inventory.
+- **Expiry** uses the frozen `expiresAt` and `graceDays`: redemption is allowed
+  until `expiresAt + graceDays`, then rejected. The sweep in step 7 only closes
+  what is already past that window.
+- **Balances are authoritative and CAS-guarded.** The update filters on the
+  previously read `usedUnits`, so two concurrent redemptions cannot both apply;
+  the loser gets `409` and no partial write survives.
+- Exhaustion sets `status 1` and `closedAt`; a cancelled (`3`) or expired (`2`)
+  voucher cannot be redeemed.
+- Redemption rows are append-only: voiding marks `voidedAt`, `voidedBy` and
+  `voidReason`, never deletes.
+- **Void is admin/supervisor only** (D4). It restores the stock the redemption
+  took, returns the balance, and reopens an exhausted voucher to active. It
+  keeps `expired`/`cancelled` status untouched and rejects a second void.
 
 ---
 
@@ -436,12 +471,19 @@ internal; a **refund** returns money to the customer and does not exist.
 No `DailyProduction` table and no planned production quotas. Reservations consume
 the existing `Product.stock`. Production planning is out of scope.
 
+**D4 — Who can void a redemption (approved: admin and supervisor only).**
+
+A redemption hands over product; reversing it fabricates inventory. It is an
+administrative correction, not an operator action, so it mirrors reservation void:
+**admin (`0`) and supervisor (`1`) only**. A seller (`2`) gets `403`. The reason
+is mandatory and recorded on the append-only row (`voidedAt`, `voidedBy`,
+`voidReason`).
+
 ### Still open
 
 | # | Decision | Options | Impact |
 | --- | --- | --- | --- |
 | D3 | Can a combo item be substituted | no / within same category | `allowSubstitution` becomes real logic |
-| D4 | Who can void a redemption | any operator / supervisor only | role check in middleware |
 | D5 | Voucher expiry policy | never / fixed days / fiscal-period end | `validityDays`, sweep job |
 | D6 | Can a voucher be transferred to another person | no / yes | `customerPhone` becomes mutable, needs history |
 | D7 | No-show courtesy | none / credit toward a future purchase | D1 rules out cash refunds; a credit needs a linked voucher. Does not block step 1 |
@@ -450,7 +492,7 @@ the existing `Product.stock`. Production planning is out of scope.
 
 ## 13. Build order
 
-Status: **1, 2, 3 and 4 implemented and runtime-verified** against a scratch database.
+Status: **1, 2, 3, 4 and 5 implemented and runtime-verified** against a scratch database.
 
 1. ✅ **SaleItem `stockProduct` + `conversionFactor`** and the reversal-filter fix.
    Nothing else works before this, and it is useful on its own.
@@ -481,7 +523,18 @@ Status: **1, 2, 3 and 4 implemented and runtime-verified** against a scratch dat
      item, and the sale must be fully paid.
    - Cancelling or deleting the sale cancels its vouchers, unless one was
      already redeemed.
-5. **ComboRedemption** with idempotency and conditional decrement.
+5. ✅ **ComboRedemption** with idempotency and conditional decrement.
+   Endpoints under `/api/v1/combo-purchases`:
+   `GET /`, `GET /:idOrCode`, `GET /:idOrCode/redemptions`,
+   `POST /:idOrCode/redemptions`, `POST /:idOrCode/redemptions/:redemptionId/void`.
+   - Exact components only (no substitution), balances are authoritative and
+     CAS-guarded, and `usedUnits` is the optimistic-lock token.
+   - An identical replay of the same `idempotencyKey` returns the stored row with
+     `200`, even after the voucher was exhausted by that redemption.
+   - Stock moves only for balances carrying `stockProduct`; `null` touches nothing.
+   - Expiry honours the frozen `expiresAt` and `graceDays`.
+   - Void is admin/supervisor only, requires a reason, restores stock and reopens
+     an exhausted voucher.
 6. **StockAdjustment** + reconciliation check.
 7. Expiry sweeps for both reservations and vouchers.
 
