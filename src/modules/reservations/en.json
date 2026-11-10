@@ -1,0 +1,22 @@
+{
+    "error_reservation_customer_required": "Customer name and phone are required.",
+    "error_reservation_items_required": "The reservation must include at least one product.",
+    "error_reservation_invalid_customer_id": "The provided customer ID is invalid.",
+    "error_reservation_invalid_payment_method": "Payment method is invalid. Must be 0 (Cash), 1 (Transfer), 2 (Card), or 3 (Other).",
+    "error_reservation_invalid_dates": "Pickup and expiry dates are required, and expiry must be later than pickup.",
+    "error_reservation_invalid_id": "The provided reservation ID is invalid.",
+    "error_reservation_not_found": "Reservation not found.",
+    "error_reservation_not_active": "Only active reservations can be modified.",
+    "error_reservation_product_not_found": "One or more products in the reservation do not exist.",
+    "error_reservation_invalid_quantity": "The quantity or conversion factor of an item is invalid.",
+    "error_reservation_invalid_amount": "The reservation total amount must be greater than zero.",
+    "error_reservation_insufficient_stock": "Insufficient stock for one or more products in the reservation.",
+    "error_reservation_duplicate_code": "A unique reservation code could not be generated. Please try again.",
+    "error_reservation_forbidden": "Only an administrator or supervisor can void a reservation.",
+    "error_internal_server_generic": "An unexpected error occurred on the server.",
+    "success_reservation_created": "Reservation created successfully.",
+    "success_reservations_fetched": "Reservations fetched successfully.",
+    "success_reservation_fetched": "Reservation fetched successfully.",
+    "success_reservation_fulfilled": "Reservation fulfilled successfully.",
+    "success_reservation_voided": "Reservation voided successfully."
+}

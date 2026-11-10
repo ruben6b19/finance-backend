@@ -60,6 +60,7 @@ import productCategoryRouter from './modules/productCategories/productCategory.r
 import transactionCategoryRouter from './modules/transactionCategories/transactionCategory.routes.js';
 import purchaseRouter from './modules/purchases/purchase.routes.js';
 import unitRouter from './modules/units/unit.routes.js';
+import reservationRouter from './modules/reservations/reservation.routes.js';
 //import profileRouter from './modules/profiles/profile.routes.js';
 //import accountRouter from './modules/accounts/account.routes.js';
 //import netflixRouter from './modules/netflix/netflix.routes.js';
@@ -74,6 +75,7 @@ app.use("/api/v1/product-categories", productCategoryRouter)
 app.use("/api/v1/transaction-categories", transactionCategoryRouter)
 app.use("/api/v1/purchases", purchaseRouter)
 app.use("/api/v1/units", unitRouter)
+app.use("/api/v1/reservations", reservationRouter)
 //app.use("/api/v1/profiles", profileRouter);
 //app.use("/api/v1/accounts", accountRouter);
 //app.use("/api/v1/netflix", netflixRouter)

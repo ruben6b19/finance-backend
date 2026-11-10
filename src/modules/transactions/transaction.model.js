@@ -47,6 +47,14 @@ const transactionSchema = new Schema(
       ref: 'Purchase',
       default: null
     },
+    // Ingreso de una reserva (pago total anticipado). Obligatorio en ese flujo
+    // para poder rastrear su reversión administrativa.
+    reservationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Reservation',
+      default: null,
+      index: true
+    },
 
     status: {
       type: Number,

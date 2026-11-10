@@ -1,0 +1,22 @@
+{
+    "error_reservation_customer_required": "El nombre y el teléfono del cliente son obligatorios.",
+    "error_reservation_items_required": "La reserva debe incluir al menos un producto.",
+    "error_reservation_invalid_customer_id": "El ID de cliente proporcionado no es válido.",
+    "error_reservation_invalid_payment_method": "El método de pago no es válido. Debe ser 0 (Efectivo), 1 (Transferencia), 2 (Tarjeta) o 3 (Otro).",
+    "error_reservation_invalid_dates": "Las fechas de retiro y de vencimiento son obligatorias y el vencimiento debe ser posterior al retiro.",
+    "error_reservation_invalid_id": "El ID de la reserva proporcionado no es válido.",
+    "error_reservation_not_found": "Reserva no encontrada.",
+    "error_reservation_not_active": "Solo se pueden modificar reservas activas.",
+    "error_reservation_product_not_found": "Uno o más productos de la reserva no existen.",
+    "error_reservation_invalid_quantity": "La cantidad o el factor de conversión de un ítem no es válido.",
+    "error_reservation_invalid_amount": "El monto total de la reserva debe ser mayor a cero.",
+    "error_reservation_insufficient_stock": "Stock insuficiente para uno o más productos de la reserva.",
+    "error_reservation_duplicate_code": "No se pudo generar un código único para la reserva. Intente nuevamente.",
+    "error_reservation_forbidden": "Solo un administrador o supervisor puede anular una reserva.",
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor.",
+    "success_reservation_created": "Reserva creada correctamente.",
+    "success_reservations_fetched": "Reservas obtenidas correctamente.",
+    "success_reservation_fetched": "Reserva obtenida correctamente.",
+    "success_reservation_fulfilled": "Reserva entregada correctamente.",
+    "success_reservation_voided": "Reserva anulada correctamente."
+}
