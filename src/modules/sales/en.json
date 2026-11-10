@@ -12,6 +12,10 @@
     "error_sale_items_required": "At least one item or product must be included in the sale.",
     "error_sale_invalid_transaction_category": "The provided transaction category is not valid.",
     "error_sale_already_cancelled": "This sale has already been cancelled.",
+    "error_sale_immutable_date": "Only sales made today can be modified, cancelled, or deleted.",
+    "error_sale_insufficient_stock": "Insufficient stock for one or more products in the sale.",
+    "error_sale_stock_product_not_found": "The specified stock product does not exist.",
+    "error_sale_invalid_item_quantity": "The quantity or conversion factor of an item is invalid.",
 
     "success_sale_created": "Sale created successfully.",
     "success_sale_updated": "Sale updated successfully.",

@@ -2,13 +2,12 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { Sale } from "./sale.model.js";
-import { Product } from "../products/product.model.js";
 import { Transaction } from "../transactions/transaction.model.js";
-import { TransactionCategory } from "../transactionCategories/transactionCategory.model.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import { applyStockMovement, createSaleRecord, STOCK_ERROR_CODES } from "./sale.service.js";
 
 const translations = {
     es: esTranslations,
@@ -60,58 +59,26 @@ const createSale = asyncHandler(async (req, res) => {
     session.startTransaction();
 
     try {
-        if (!categoryId) {
-            const defaultCategory = await TransactionCategory.findOne({ name: 'Ventas POS', type: 0, isSystem: true }).session(session);
-            if (defaultCategory) {
-                categoryId = defaultCategory._id;
-            }
-        }
-        console.log(`Creating sale with categoryId: ${categoryId}`);
-        const sale = await Sale.create([{
-            saleNumber: saleNumber ? saleNumber.trim() : undefined,
-            customerName: customerName ? customerName.trim() : undefined,
-            customerId: customerId || null,
-            items: items || [],
-            subtotal: subtotal !== undefined ? Number(subtotal) : numericTotalAmount,
-            tax: tax !== undefined ? Number(tax) : 0,
-            discount: discount !== undefined ? Number(discount) : 0,
-            totalAmount: numericTotalAmount,
-            paymentMethod: selectedPaymentMethod,
-            paymentStatus: selectedPaymentStatus,
-            saleStatus: selectedSaleStatus,
-            saleDate: saleDate ? new Date(saleDate) : new Date(),
-            notes: notes ? notes.trim() : undefined,
-            createdBy: req.user?.mongoDbId || null
-        }], { session });
-
-        const createdSale = sale[0];
-
-        // REDUCCIÓN DE STOCK AUTOMÁTICA
-        if (items && items.length > 0) {
-            for (const item of items) {
-                await Product.findByIdAndUpdate(
-                    item.product,
-                    { $inc: { stock: -item.quantity } },
-                    { session }
-                );
-            }
-        }
-
-        const transaction = await Transaction.create([{
-            type: 0,
-            amount: numericTotalAmount,
-            paymentMethod: selectedPaymentMethod,
-            concept: `Venta ${saleNumber ? saleNumber.trim() : createdSale._id}`,
-            category: categoryId,
-            date: saleDate ? new Date(saleDate) : new Date(),
-            saleId: createdSale._id,
-            notes: notes ? notes.trim() : undefined,
-            createdBy: req.user?.mongoDbId || null
-        }], { session });
-
-        console.log(`Created transaction with ID: ${transaction}`);
-        createdSale.transactionId = transaction[0]._id;
-        await createdSale.save({ session });
+        const createdSale = await createSaleRecord({
+            payload: {
+                saleNumber,
+                customerName,
+                customerId,
+                items: items || [],
+                subtotal,
+                tax,
+                discount,
+                totalAmount: numericTotalAmount,
+                paymentMethod: selectedPaymentMethod,
+                paymentStatus: selectedPaymentStatus,
+                saleStatus: selectedSaleStatus,
+                saleDate,
+                categoryId,
+                notes
+            },
+            userId: req.user?.mongoDbId || null,
+            session
+        });
 
         await session.commitTransaction();
         session.endSession();
@@ -123,6 +90,12 @@ const createSale = asyncHandler(async (req, res) => {
         await session.abortTransaction();
         session.endSession();
         console.error("Error creating sale:", error);
+
+        const stockErrorCode = STOCK_ERROR_CODES[error?.message];
+        if (stockErrorCode) {
+            return translateErrorResponse(res, lang, stockErrorCode, 400, translations);
+        }
+
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }
 });
@@ -364,13 +337,7 @@ const deleteSale = asyncHandler(async (req, res) => {
 
         // 1. REVERSIÓN DE STOCK (Si la venta no estaba ya cancelada)
         if (sale.saleStatus !== 2) {
-            for (const item of sale.items) {
-                await Product.updateOne(
-                    { _id: item.product, productType: 2 },
-                    { $inc: { stock: item.quantity } },
-                    { session }
-                );
-            }
+            await applyStockMovement(sale.items, session, 1);
         }
 
         // 2. ANULACIÓN DE TRANSACCIÓN VINCULADA
@@ -509,13 +476,7 @@ const cancelSale = asyncHandler(async (req, res) => {
     sale.paymentStatus = 2;
     await sale.save({ session });
 
-    for (const item of sale.items) {
-      await Product.updateOne(
-        { _id: item.product, productType: 2 },
-        { $inc: { stock: item.quantity } },
-        { session }
-      );
-    }
+    await applyStockMovement(sale.items, session, 1);
 
     if (sale.transactionId) {
       await Transaction.findByIdAndUpdate(

@@ -13,6 +13,9 @@
     "error_sale_invalid_transaction_category": "La categoría de transacción proporcionada no es válida.",
     "error_sale_already_cancelled": "Esta venta ya se encuentra anulada.",
     "error_sale_immutable_date": "Solo se pueden modificar, anular o eliminar ventas realizadas el día de hoy.",
+    "error_sale_insufficient_stock": "Stock insuficiente para uno o más productos de la venta.",
+    "error_sale_stock_product_not_found": "El producto de stock indicado no existe.",
+    "error_sale_invalid_item_quantity": "La cantidad o el factor de conversión de un ítem no es válido.",
 
     "success_sale_created": "Venta creada exitosamente.",
     "success_sale_updated": "Venta actualizada exitosamente.",

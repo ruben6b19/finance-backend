@@ -19,6 +19,20 @@ const saleItemSchema = new Schema(
       type: Schema.Types.Decimal128,
       required: true
     },
+    // Producto que descuenta stock. null => se usa `product`.
+    // Permite vender una presentación ("1/4 de pollo") consumiendo stock de un
+    // acumulador distinto ("Pollo (presa)").
+    stockProduct: {
+      type: Schema.Types.ObjectId,
+      ref: 'Product',
+      default: null
+    },
+    // Unidades de stock consumidas por unidad vendida (ej: 1/4 de pollo = 2 presas).
+    conversionFactor: {
+      type: Number,
+      default: 1,
+      min: 0
+    },
     subtotal: {
       type: Schema.Types.Decimal128,
       required: true
