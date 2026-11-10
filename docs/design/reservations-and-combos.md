@@ -1,6 +1,6 @@
 # Design: Reservations & Combo Vouchers
 
-Status: **in implementation** — D1, D1a, D2, D4, D5, D8 resolved. Section 13 tracks the build order.
+Status: **v1 complete** — D1, D1a, D2, D4, D5, D8 resolved; D3, D6 and D7 deferred beyond v1. Section 13 tracks the build order.
 Scope: data model plus the modules that implement build-order steps 1–7.
 
 ---
@@ -500,13 +500,17 @@ definition later never rewrites an already-sold voucher. The step-7 sweep closes
 only vouchers strictly past `expiresAt + graceDays`, matching the redemption
 window. The fiscal-period-end option is out of scope.
 
-### Still open
+### Deferred beyond v1
 
-| # | Decision | Options | Impact |
+These were evaluated and explicitly postponed to keep the v1 MVP small and
+stable. Nothing implemented depends on them, and no schema field anticipates
+them, so revisiting a decision later does not require a migration.
+
+| # | Decision | Options | Impact if revisited |
 | --- | --- | --- | --- |
-| D3 | Can a combo item be substituted | no / within same category | `allowSubstitution` becomes real logic |
-| D6 | Can a voucher be transferred to another person | no / yes | `customerPhone` becomes mutable, needs history |
-| D7 | No-show courtesy | none / credit toward a future purchase | D1 rules out cash refunds; a credit needs a linked voucher. Does not block step 1 |
+| D3 | Can a combo item be substituted | no / within same category | `allowSubstitution` becomes real logic; v1 keeps exact component matches |
+| D6 | Can a voucher be transferred to another person | no / yes | `customerPhone` becomes mutable and needs a transfer history |
+| D7 | No-show courtesy | none / credit toward a future purchase | D1 rules out cash refunds; a credit needs a linked voucher |
 
 ---
 
