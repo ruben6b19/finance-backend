@@ -1,0 +1,235 @@
+import mongoose from "mongoose";
+import { asyncHandler } from "../../utils/asyncHandler.js";
+import { ApiResponse } from "../../utils/ApiResponse.js";
+import { validateDescriptionAddress } from "../../utils/regex.js";
+import { Product } from "../products/product.model.js";
+import { resolveFirebaseUser } from "../users/user.service.js";
+import { Order, ORDER_STATUS } from "./order.model.js";
+
+const PUBLIC_PRODUCT_TYPES = [1, 2];
+const MAX_QUANTITY = 99;
+const MAX_ITEMS = 50;
+const MAX_DAYS_AHEAD = 30;
+const MAX_NOTES = 300;
+const PHONE_REGEX = /^[+()\d\s-]{6,25}$/;
+
+const toNumber = (value) => {
+  if (value === undefined || value === null) return 0;
+  return Number.parseFloat(value.toString());
+};
+
+const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const toDecimal = (value) => mongoose.Types.Decimal128.fromString(round2(value).toFixed(2));
+
+const toOrderDto = (order) => ({
+  id: String(order._id),
+  code: order.code,
+  status: order.status,
+  deliveryType: order.deliveryType,
+  address: order.address || '',
+  pickupAt: new Date(order.pickupAt).toISOString(),
+  customerName: order.customerName,
+  customerPhone: order.customerPhone,
+  customerEmail: order.customerEmail || '',
+  notes: order.notes || '',
+  items: order.items.map((item) => ({
+    productId: String(item.product),
+    name: item.name,
+    unitPrice: toNumber(item.unitPrice),
+    quantity: item.quantity,
+    subtotal: toNumber(item.subtotal),
+  })),
+  total: toNumber(order.total),
+  createdAt: order.createdAt,
+});
+
+const respondUserError = (res, result) => {
+  if (result.error === "missing_uid") {
+    return res.status(401).json(new ApiResponse(401, {}, "error_token_missing_uid"));
+  }
+  if (result.error === "missing_email") {
+    return res.status(400).json(new ApiResponse(400, {}, "error_user_email_required"));
+  }
+  return res.status(500).json(new ApiResponse(500, {}, "error_internal_server_generic"));
+};
+
+const createOrder = asyncHandler(async (req, res) => {
+  const resolved = await resolveFirebaseUser({
+    firebaseUid: req.user?.firebaseUid,
+    email: req.user?.email,
+    name: req.user?.name,
+  });
+  if (resolved.error) return respondUserError(res, resolved);
+
+  const { items, deliveryType, pickupAt, address, phone, notes } = req.body || {};
+
+  // 1. Items: shape, ids, quantities and duplicate aggregation.
+  if (!Array.isArray(items) || items.length === 0 || items.length > MAX_ITEMS) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_items"));
+  }
+
+  const quantities = new Map();
+  for (const entry of items) {
+    const productId = entry?.productId;
+    const quantity = entry?.quantity;
+    if (typeof productId !== "string" || !mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_items"));
+    }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_items"));
+    }
+    const key = String(productId);
+    const sum = (quantities.get(key) || 0) + quantity;
+    if (sum > MAX_QUANTITY) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_items"));
+    }
+    quantities.set(key, sum);
+  }
+
+  const ids = [...quantities.keys()];
+  const products = await Product.find({ _id: { $in: ids }, status: 1, isSellable: true });
+  if (products.length !== ids.length) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_product_not_found"));
+  }
+
+  // 2. Prices are always computed server-side from the stored product price.
+  const normalizedItems = [];
+  let total = 0;
+  for (const product of products) {
+    if (product.productType === 3) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_combo_not_allowed"));
+    }
+    if (!PUBLIC_PRODUCT_TYPES.includes(product.productType)) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_product_not_found"));
+    }
+    const quantity = quantities.get(String(product._id));
+    const unitPrice = toNumber(product.price);
+    const subtotal = round2(unitPrice * quantity);
+    total = round2(total + subtotal);
+    normalizedItems.push({
+      product: product._id,
+      name: product.name,
+      unitPrice: toDecimal(unitPrice),
+      quantity,
+      subtotal: toDecimal(subtotal),
+    });
+  }
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_amount"));
+  }
+
+  // 3. Delivery type and address.
+  if (deliveryType !== 'pickup' && deliveryType !== 'delivery') {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_delivery_type"));
+  }
+
+  let normalizedAddress = '';
+  if (deliveryType === 'delivery') {
+    const trimmedAddress = typeof address === "string" ? address.trim() : "";
+    if (
+      trimmedAddress.length < 5 ||
+      trimmedAddress.length > 150 ||
+      !validateDescriptionAddress.test(trimmedAddress)
+    ) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_address_required"));
+    }
+    normalizedAddress = trimmedAddress;
+  }
+
+  // 4. Phone.
+  const trimmedPhone = typeof phone === "string" ? phone.trim() : "";
+  if (trimmedPhone.length < 6 || trimmedPhone.length > 25 || !PHONE_REGEX.test(trimmedPhone)) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_phone_required"));
+  }
+
+  // 5. Pickup date.
+  const pickupDate = new Date(pickupAt);
+  const now = Date.now();
+  if (
+    Number.isNaN(pickupDate.getTime()) ||
+    pickupDate.getTime() < now - 5 * 60 * 1000 ||
+    pickupDate.getTime() > now + MAX_DAYS_AHEAD * 24 * 60 * 60 * 1000
+  ) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_pickup_at"));
+  }
+
+  // 6. Notes.
+  let normalizedNotes = '';
+  if (notes !== undefined && notes !== null) {
+    if (typeof notes !== "string") {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_notes"));
+    }
+    normalizedNotes = notes.trim();
+    if (normalizedNotes.length > MAX_NOTES) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_notes"));
+    }
+  }
+
+  try {
+    const orderId = new mongoose.Types.ObjectId();
+    const code = `PED-${orderId.toString().slice(-6).toUpperCase()}`;
+    const order = await Order.create({
+      _id: orderId,
+      code,
+      customer: resolved.user._id,
+      customerName: resolved.user.fullName,
+      customerPhone: trimmedPhone,
+      customerEmail: resolved.user.email || '',
+      deliveryType,
+      address: normalizedAddress,
+      pickupAt: pickupDate,
+      items: normalizedItems,
+      total: toDecimal(total),
+      status: ORDER_STATUS.PENDING,
+      notes: normalizedNotes,
+    });
+
+    return res.status(201).json(new ApiResponse(201, toOrderDto(order), "success_order_created"));
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json(new ApiResponse(409, {}, "error_order_duplicate_code"));
+    }
+    console.error("createOrder failed:", error);
+    return res.status(500).json(new ApiResponse(500, {}, "error_internal_server_generic"));
+  }
+});
+
+const getMyOrders = asyncHandler(async (req, res) => {
+  const resolved = await resolveFirebaseUser({
+    firebaseUid: req.user?.firebaseUid,
+    email: req.user?.email,
+    name: req.user?.name,
+  });
+  if (resolved.error) return respondUserError(res, resolved);
+
+  const orders = await Order.find({ customer: resolved.user._id })
+    .sort({ createdAt: -1 })
+    .limit(50);
+
+  return res.status(200).json(new ApiResponse(200, orders.map(toOrderDto), "success_orders_fetched"));
+});
+
+const getMyOrderById = asyncHandler(async (req, res) => {
+  const resolved = await resolveFirebaseUser({
+    firebaseUid: req.user?.firebaseUid,
+    email: req.user?.email,
+    name: req.user?.name,
+  });
+  if (resolved.error) return respondUserError(res, resolved);
+
+  const { orderId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_id"));
+  }
+
+  const order = await Order.findOne({ _id: orderId, customer: resolved.user._id });
+  if (!order) {
+    return res.status(404).json(new ApiResponse(404, {}, "error_order_not_found"));
+  }
+
+  return res.status(200).json(new ApiResponse(200, toOrderDto(order), "success_order_fetched"));
+});
+
+export { createOrder, getMyOrders, getMyOrderById };
