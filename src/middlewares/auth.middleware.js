@@ -98,7 +98,9 @@ export const verifyFirebaseToken = async (req, res, next) => {
             firebaseUid: decodedToken.uid,
             mongoDbId: decodedToken.mongoDbId, // Tu _id de Mongoose (si está en claims)
             role: decodedToken.role,           // Tus roles (si están en claims)
-            //email: decodedToken.email
+            email: decodedToken.email,
+            name: decodedToken.name,
+            picture: decodedToken.picture,
             instituteLang: decodedToken.instituteLang
         };
         //console.log("Decoded Firebase Token:", decodedToken);    

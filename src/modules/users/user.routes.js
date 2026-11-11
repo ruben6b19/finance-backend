@@ -17,6 +17,7 @@ import {
     deleteUser,
     changePassword
 } from "./user.controller.js";
+import { registerOrGetGoogleUser } from "./google.controller.js";
 //import {upload} from "../../middlewares/multer.middleware.js"
 import { verifyFirebaseToken, verifyJWT } from "../../middlewares/auth.middleware.js";
 import { get } from "mongoose";
@@ -36,6 +37,8 @@ router.route("/logout").post(verifyFirebaseToken,  logoutUser)
 router.route("/refresh-token").post(refreshAccessToken2)
 
 router.route("/all/:page").get(verifyFirebaseToken, getAllUsers);
+
+router.route("/google").post(verifyFirebaseToken, registerOrGetGoogleUser)
 
 router.route("/:userId").patch(verifyFirebaseToken, updateUser)
                         .delete(verifyFirebaseToken, deleteUser);
