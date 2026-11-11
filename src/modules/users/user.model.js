@@ -37,6 +37,11 @@ const userSchema = new Schema(
             unique: true, 
             sparse: true // Permite valores nulos si no todos los usuarios son de Firebase
         },
+        phone: {
+            type: String,
+            trim: true,
+            default: ''
+        },
         role: {
             type: [Number],
             required: true,

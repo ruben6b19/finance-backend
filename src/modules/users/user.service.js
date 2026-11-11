@@ -59,6 +59,7 @@ export function toPublicUser(user) {
     id: String(user._id),
     email: user.email,
     fullName: user.fullName,
+    phone: user.phone || '',
     role: Array.isArray(user.role) ? user.role : [user.role],
     status: user.status,
   };

@@ -5,6 +5,7 @@ import { validateDescriptionAddress, validateName } from "../../utils/regex.js";
 import { ROLES } from "../../constants/roles.js";
 import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
+import { User } from "../users/user.model.js";
 import { Order, ORDER_STATUS } from "./order.model.js";
 
 const PUBLIC_PRODUCT_TYPES = [1, 2];
@@ -13,6 +14,14 @@ const MAX_ITEMS = 50;
 const MAX_DAYS_AHEAD = 30;
 const MAX_NOTES = 300;
 const PHONE_REGEX = /^[+()\d\s-]{6,25}$/;
+
+/** Roles whose profile is managed by an administrator, never by the storefront. */
+const STAFF_ROLES = [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
+
+const toRoleList = (role) => (Array.isArray(role) ? role : [role]).map(Number);
+
+const hasAnyRole = (role, allowed) =>
+  toRoleList(role).some((value) => allowed.includes(value));
 
 const toNumber = (value) => {
   if (value === undefined || value === null) return 0;
@@ -178,6 +187,37 @@ const createOrder = asyncHandler(async (req, res) => {
     }
   }
 
+  // 7. Keep the customer profile in sync with the contact data used here.
+  //    The order already keeps its own immutable snapshot (customerName,
+  //    customerPhone, customerEmail), so editing the profile later never
+  //    rewrites past orders. Staff profiles are managed by an administrator
+  //    and must not be renamed from the storefront checkout.
+  if (!hasAnyRole(resolved.user.role, STAFF_ROLES)) {
+    const profilePatch = {};
+
+    if (rawContactName !== resolved.user.fullName) {
+      profilePatch.fullName = rawContactName;
+    }
+
+    if (trimmedPhone !== (resolved.user.phone || '')) {
+      profilePatch.phone = trimmedPhone;
+    }
+
+    if (Object.keys(profilePatch).length > 0) {
+      try {
+        await User.updateOne(
+          { _id: resolved.user._id },
+          { $set: profilePatch },
+          { runValidators: true }
+        );
+      } catch (error) {
+        // Best effort: the order snapshot is authoritative, so a profile sync
+        // failure must never block the customer's purchase.
+        console.error("createOrder profile sync failed:", error?.message);
+      }
+    }
+  }
+
   try {
     const orderId = new mongoose.Types.ObjectId();
     const code = `PED-${orderId.toString().slice(-6).toUpperCase()}`;
@@ -254,14 +294,7 @@ const getAllOrders = asyncHandler(async (req, res) => {
   // Only staff may list every order. Clients see their own via GET /orders/me.
   // Read the role from the Mongo user, not from req.user: Firebase custom claims
   // are not set for storefront clients, so hasRole(req, ...) would deny everyone.
-  const roles = Array.isArray(resolved.user.role)
-    ? resolved.user.role
-    : [resolved.user.role];
-  const isStaff = roles.some((role) =>
-    [ROLES.ADMIN, ROLES.SUPERVISOR].includes(Number(role))
-  );
-
-  if (!isStaff) {
+  if (!hasAnyRole(resolved.user.role, [ROLES.ADMIN, ROLES.SUPERVISOR])) {
     return res
       .status(403)
       .json(new ApiResponse(403, {}, "error_orders_list_forbidden"));
