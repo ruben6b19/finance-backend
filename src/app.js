@@ -56,6 +56,7 @@ import userRouter from './modules/users/user.routes.js'
 import transactionRouter from './modules/transactions/transaction.routes.js';
 import saleRouter from './modules/sales/sale.routes.js';
 import productRouter from './modules/products/product.routes.js';
+import catalogRouter from './modules/catalog/catalog.routes.js';
 import productCategoryRouter from './modules/productCategories/productCategory.routes.js';
 import transactionCategoryRouter from './modules/transactionCategories/transactionCategory.routes.js';
 import purchaseRouter from './modules/purchases/purchase.routes.js';
@@ -75,6 +76,7 @@ app.use("/api/v1/users", userRouter)
 app.use("/api/v1/transactions", transactionRouter)
 app.use("/api/v1/sales", saleRouter)
 app.use("/api/v1/products", productRouter)
+app.use("/api/v1/catalog", catalogRouter)
 app.use("/api/v1/product-categories", productCategoryRouter)
 app.use("/api/v1/transaction-categories", transactionCategoryRouter)
 app.use("/api/v1/purchases", purchaseRouter)
