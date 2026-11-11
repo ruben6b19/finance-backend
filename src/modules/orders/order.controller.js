@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { validateDescriptionAddress } from "../../utils/regex.js";
+import { validateDescriptionAddress, validateName } from "../../utils/regex.js";
 import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { Order, ORDER_STATUS } from "./order.model.js";
@@ -144,6 +144,16 @@ const createOrder = asyncHandler(async (req, res) => {
     return res.status(400).json(new ApiResponse(400, {}, "error_order_phone_required"));
   }
 
+  // 4b. Customer contact name (mandatory, client-supplied).
+  const rawContactName =
+    typeof req.body?.contactName === "string" ? req.body.contactName.trim() : "";
+
+  if (!validateName.test(rawContactName)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, {}, "error_order_contact_name_required"));
+  }
+
   // 5. Pickup date.
   const pickupDate = new Date(pickupAt);
   const now = Date.now();
@@ -174,7 +184,7 @@ const createOrder = asyncHandler(async (req, res) => {
       _id: orderId,
       code,
       customer: resolved.user._id,
-      customerName: resolved.user.fullName,
+      customerName: rawContactName,
       customerPhone: trimmedPhone,
       customerEmail: resolved.user.email || '',
       deliveryType,
