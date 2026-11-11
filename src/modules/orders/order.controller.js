@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { validateDescriptionAddress, validateName } from "../../utils/regex.js";
+import { ROLES } from "../../constants/roles.js";
 import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { Order, ORDER_STATUS } from "./order.model.js";
@@ -242,4 +243,35 @@ const getMyOrderById = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, toOrderDto(order), "success_order_fetched"));
 });
 
-export { createOrder, getMyOrders, getMyOrderById };
+const getAllOrders = asyncHandler(async (req, res) => {
+  const resolved = await resolveFirebaseUser({
+    firebaseUid: req.user?.firebaseUid,
+    email: req.user?.email,
+    name: req.user?.name,
+  });
+  if (resolved.error) return respondUserError(res, resolved);
+
+  // Only staff may list every order. Clients see their own via GET /orders/me.
+  // Read the role from the Mongo user, not from req.user: Firebase custom claims
+  // are not set for storefront clients, so hasRole(req, ...) would deny everyone.
+  const roles = Array.isArray(resolved.user.role)
+    ? resolved.user.role
+    : [resolved.user.role];
+  const isStaff = roles.some((role) =>
+    [ROLES.ADMIN, ROLES.SUPERVISOR].includes(Number(role))
+  );
+
+  if (!isStaff) {
+    return res
+      .status(403)
+      .json(new ApiResponse(403, {}, "error_orders_list_forbidden"));
+  }
+
+  const orders = await Order.find({})
+    .sort({ createdAt: -1 })
+    .limit(100);
+
+  return res.status(200).json(new ApiResponse(200, orders.map(toOrderDto), "success_orders_fetched"));
+});
+
+export { createOrder, getMyOrders, getMyOrderById, getAllOrders };
