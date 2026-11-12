@@ -376,7 +376,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
     }
 
-    await createSaleRecord({
+    const sale = await createSaleRecord({
       payload: {
         customerName: order.customerName,
         customerPhone: order.customerPhone,
@@ -401,6 +401,11 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       transactionExtra: { orderId: order._id }
     });
 
+    // El pedido guarda la venta que generó: sin este vínculo el ingreso queda
+    // huérfano y solo se puede rastrear por el texto de las notas.
+    updatedOrder.saleId = sale._id;
+    await updatedOrder.save({ session });
+
     await session.commitTransaction();
     session.endSession();
 
@@ -415,7 +420,8 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       return res.status(400).json(new ApiResponse(400, {}, stockErrorCode));
     }
 
-    return res.status(400).json(new ApiResponse(400, {}, error?.message || "error_internal_server_generic"));
+    // Falla interna: se loguea arriba, pero al cliente no se le filtran detalles.
+    return res.status(500).json(new ApiResponse(500, {}, "error_internal_server_generic"));
   }
 });
 

@@ -55,6 +55,13 @@ const transactionSchema = new Schema(
       default: null,
       index: true
     },
+    // Ingreso de un pedido confirmado desde el storefront.
+    orderId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Order',
+      default: null,
+      index: true
+    },
 
     status: {
       type: Number,

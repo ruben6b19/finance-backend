@@ -32,6 +32,7 @@ const orderSchema = new Schema(
     total: { type: Schema.Types.Decimal128, required: true },
     status: { type: Number, enum: Object.values(ORDER_STATUS), default: ORDER_STATUS.PENDING },
     notes: { type: String, default: '', trim: true },
+    saleId: { type: Schema.Types.ObjectId, ref: 'Sale', default: null },
   },
   { timestamps: true }
 );
