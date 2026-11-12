@@ -2,7 +2,7 @@ import mongoose, { Schema } from 'mongoose';
 import mongoosePaginate from 'mongoose-paginate-v2';
 
 export const ORDER_STATUS = { PENDING: 0, CONFIRMED: 1, CANCELLED: 2, COMPLETED: 3 };
-export const DELIVERY_TYPES = ['pickup', 'delivery'];
+export const DELIVERY_TYPES = { DINE_IN: 0, PICKUP: 1, DELIVERY: 2 };
 
 const orderItemSchema = new Schema(
   {
@@ -22,7 +22,7 @@ const orderSchema = new Schema(
     customerName: { type: String, required: true, trim: true },
     customerPhone: { type: String, required: true, trim: true },
     customerEmail: { type: String, default: '', trim: true },
-    deliveryType: { type: String, enum: DELIVERY_TYPES, required: true },
+    deliveryType: { type: Number, enum: Object.values(DELIVERY_TYPES), required: true },
     address: { type: String, default: '', trim: true },
     pickupAt: { type: Date, required: true },
     items: {

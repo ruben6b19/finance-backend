@@ -6,7 +6,7 @@ import { ROLES } from "../../constants/roles.js";
 import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { User } from "../users/user.model.js";
-import { Order, ORDER_STATUS } from "./order.model.js";
+import { Order, ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord } from "../sales/sale.service.js";
 
 const PUBLIC_PRODUCT_TYPES = [1, 2];
@@ -132,12 +132,12 @@ const createOrder = asyncHandler(async (req, res) => {
   }
 
   // 3. Delivery type and address.
-  if (deliveryType !== 'pickup' && deliveryType !== 'delivery') {
+  if (!Object.values(DELIVERY_TYPES).includes(deliveryType)) {
     return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_delivery_type"));
   }
 
   let normalizedAddress = '';
-  if (deliveryType === 'delivery') {
+  if (deliveryType === DELIVERY_TYPES.DELIVERY) {
     const trimmedAddress = typeof address === "string" ? address.trim() : "";
     if (
       trimmedAddress.length < 5 ||
