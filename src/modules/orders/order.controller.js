@@ -371,7 +371,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     );
 
     if (!updatedOrder) {
-      await session.abortTransaction();
+      if (session.inTransaction()) await session.abortTransaction();
       session.endSession();
       return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
     }
@@ -411,7 +411,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
 
     return res.status(200).json(new ApiResponse(200, toOrderDto(updatedOrder), "success_order_confirmed"));
   } catch (error) {
-    await session.abortTransaction();
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
     console.error("updateOrderStatus confirmation failed:", error);
 

@@ -182,7 +182,7 @@ const createReservation = asyncHandler(async (req, res) => {
             new ApiResponse(201, reservation[0], translations[lang]?.success_reservation_created || "success_reservation_created")
         );
     } catch (error) {
-        await session.abortTransaction();
+        if (session.inTransaction()) await session.abortTransaction();
         session.endSession();
         console.error("Error creating reservation:", error);
 
@@ -333,13 +333,13 @@ const voidReservation = asyncHandler(async (req, res) => {
         const reservation = await Reservation.findById(reservationId).session(session);
 
         if (!reservation) {
-            await session.abortTransaction();
+            if (session.inTransaction()) await session.abortTransaction();
             session.endSession();
             return translateErrorResponse(res, lang, "error_reservation_not_found", 404, translations);
         }
 
         if (reservation.status !== 0) {
-            await session.abortTransaction();
+            if (session.inTransaction()) await session.abortTransaction();
             session.endSession();
             return translateErrorResponse(res, lang, "error_reservation_not_active", 400, translations);
         }
@@ -378,7 +378,7 @@ const voidReservation = asyncHandler(async (req, res) => {
             new ApiResponse(200, reservation, translations[lang]?.success_reservation_voided || "success_reservation_voided")
         );
     } catch (error) {
-        await session.abortTransaction();
+        if (session.inTransaction()) await session.abortTransaction();
         session.endSession();
         console.error("Error voiding reservation:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
