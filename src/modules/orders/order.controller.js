@@ -7,6 +7,7 @@ import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { User } from "../users/user.model.js";
 import { Order, ORDER_STATUS } from "./order.model.js";
+import { createSaleRecord } from "../sales/sale.service.js";
 
 const PUBLIC_PRODUCT_TYPES = [1, 2];
 const MAX_QUANTITY = 99;
@@ -307,4 +308,115 @@ const getAllOrders = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, orders.map(toOrderDto), "success_orders_fetched"));
 });
 
-export { createOrder, getMyOrders, getMyOrderById, getAllOrders };
+const STOCK_ERROR_I18N = {
+  INSUFFICIENT_STOCK: "error_order_insufficient_stock",
+  STOCK_PRODUCT_NOT_FOUND: "error_order_product_not_found",
+  INVALID_STOCK_PRODUCT: "error_order_product_not_found",
+  INVALID_STOCK_AMOUNT: "error_order_invalid_quantity"
+};
+
+const updateOrderStatus = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const { status } = req.body || {};
+
+  if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_id"));
+  }
+
+  const targetStatus = Number(status);
+  if (![1, 2].includes(targetStatus)) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_status"));
+  }
+
+  const resolved = await resolveFirebaseUser({
+    firebaseUid: req.user?.firebaseUid,
+    email: req.user?.email,
+    name: req.user?.name,
+  });
+  if (resolved.error) return respondUserError(res, resolved);
+
+  if (!hasAnyRole(resolved.user.role, [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER])) {
+    return res.status(403).json(new ApiResponse(403, {}, "error_orders_status_forbidden"));
+  }
+
+  const order = await Order.findOne({ _id: orderId });
+  if (!order) {
+    return res.status(404).json(new ApiResponse(404, {}, "error_order_not_found"));
+  }
+
+  if (order.status !== 0) {
+    return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
+  }
+
+  if (targetStatus === 2) {
+    const updated = await Order.findOneAndUpdate(
+      { _id: orderId, status: 0 },
+      { $set: { status: 2 } },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
+    }
+    return res.status(200).json(new ApiResponse(200, toOrderDto(updated), "success_order_cancelled"));
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const updatedOrder = await Order.findOneAndUpdate(
+      { _id: orderId, status: 0 },
+      { $set: { status: 1 } },
+      { new: true, session }
+    );
+
+    if (!updatedOrder) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
+    }
+
+    await createSaleRecord({
+      payload: {
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        customerId: order.customer,
+        items: order.items.map(item => ({
+          product: item.product,
+          quantity: item.quantity,
+          unitPrice: toNumber(item.unitPrice),
+          subtotal: toNumber(item.subtotal)
+        })),
+        subtotal: toNumber(order.total),
+        tax: 0,
+        discount: 0,
+        totalAmount: toNumber(order.total),
+        paymentMethod: 0,
+        paymentStatus: 1,
+        saleStatus: 0,
+        notes: `Pedido ${order.code}`
+      },
+      userId: resolved.user._id,
+      session,
+      transactionExtra: { orderId: order._id }
+    });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json(new ApiResponse(200, toOrderDto(updatedOrder), "success_order_confirmed"));
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("updateOrderStatus confirmation failed:", error);
+
+    const stockErrorCode = STOCK_ERROR_I18N[error?.message];
+    if (stockErrorCode) {
+      return res.status(400).json(new ApiResponse(400, {}, stockErrorCode));
+    }
+
+    return res.status(400).json(new ApiResponse(400, {}, error?.message || "error_internal_server_generic"));
+  }
+});
+
+export { createOrder, getMyOrders, getMyOrderById, getAllOrders, updateOrderStatus };
