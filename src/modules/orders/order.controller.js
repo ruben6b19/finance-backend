@@ -8,8 +8,11 @@ import { resolveFirebaseUser } from "../users/user.service.js";
 import { User } from "../users/user.model.js";
 import { Order, ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord } from "../sales/sale.service.js";
+import { ComboDefinition } from "../combos/comboDefinition.model.js";
+import { ComboComponent } from "../combos/comboComponent.model.js";
 
-const PUBLIC_PRODUCT_TYPES = [1, 2];
+const COMBO_PRODUCT_TYPE = 3;
+const PUBLIC_PRODUCT_TYPES = [1, 2, COMBO_PRODUCT_TYPE];
 const MAX_QUANTITY = 99;
 const MAX_ITEMS = 50;
 const MAX_DAYS_AHEAD = 30;
@@ -45,8 +48,8 @@ const toOrderDto = (order) => ({
   customerEmail: order.customerEmail || '',
   notes: order.notes || '',
   items: order.items.map((item) => ({
-    productId: String(item.product),
-    name: item.name,
+    productId: String(item.product?._id || item.product),
+    name: item.name || item.product?.name || 'Producto',
     unitPrice: toNumber(item.unitPrice),
     quantity: item.quantity,
     subtotal: toNumber(item.subtotal),
@@ -104,13 +107,50 @@ const createOrder = asyncHandler(async (req, res) => {
     return res.status(400).json(new ApiResponse(400, {}, "error_order_product_not_found"));
   }
 
+  // 1b. A combo is only orderable when it can actually be vouchered: active
+  //     definition with at least one component. The vouchers are issued when
+  //     staff confirms the order, so an incomplete combo would blow up there
+  //     instead of at checkout, where the customer can still react.
+  const comboProductIds = products
+    .filter((product) => product.productType === COMBO_PRODUCT_TYPE)
+    .map((product) => product._id);
+
+  if (comboProductIds.length > 0) {
+    const definitions = await ComboDefinition.find({
+      product: { $in: comboProductIds },
+      status: 1,
+    }).select("_id product");
+    const definitionIdByProduct = new Map(
+      definitions.map((definition) => [String(definition.product), String(definition._id)]),
+    );
+    const definitionIds = definitions.map((definition) => definition._id);
+
+    const componentCounts = definitionIds.length > 0
+      ? await ComboComponent.aggregate([
+          { $match: { combo: { $in: definitionIds } } },
+          { $group: { _id: "$combo", total: { $sum: 1 } } },
+        ])
+      : [];
+    const combosWithComponents = new Set(
+      componentCounts
+        .filter((entry) => entry.total > 0)
+        .map((entry) => String(entry._id)),
+    );
+
+    const hasUnavailableCombo = comboProductIds.some((productId) => {
+      const definitionId = definitionIdByProduct.get(String(productId));
+      return !definitionId || !combosWithComponents.has(definitionId);
+    });
+
+    if (hasUnavailableCombo) {
+      return res.status(400).json(new ApiResponse(400, {}, "error_order_combo_unavailable"));
+    }
+  }
+
   // 2. Prices are always computed server-side from the stored product price.
   const normalizedItems = [];
   let total = 0;
   for (const product of products) {
-    if (product.productType === 3) {
-      return res.status(400).json(new ApiResponse(400, {}, "error_order_combo_not_allowed"));
-    }
     if (!PUBLIC_PRODUCT_TYPES.includes(product.productType)) {
       return res.status(400).json(new ApiResponse(400, {}, "error_order_product_not_found"));
     }
@@ -257,6 +297,7 @@ const getMyOrders = asyncHandler(async (req, res) => {
   if (resolved.error) return respondUserError(res, resolved);
 
   const orders = await Order.find({ customer: resolved.user._id })
+    .populate('items.product', 'name')
     .sort({ createdAt: -1 })
     .limit(50);
 
@@ -276,7 +317,7 @@ const getMyOrderById = asyncHandler(async (req, res) => {
     return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_id"));
   }
 
-  const order = await Order.findOne({ _id: orderId, customer: resolved.user._id });
+  const order = await Order.findOne({ _id: orderId, customer: resolved.user._id }).populate('items.product', 'name');
   if (!order) {
     return res.status(404).json(new ApiResponse(404, {}, "error_order_not_found"));
   }
@@ -295,13 +336,14 @@ const getAllOrders = asyncHandler(async (req, res) => {
   // Only staff may list every order. Clients see their own via GET /orders/me.
   // Read the role from the Mongo user, not from req.user: Firebase custom claims
   // are not set for storefront clients, so hasRole(req, ...) would deny everyone.
-  if (!hasAnyRole(resolved.user.role, [ROLES.ADMIN, ROLES.SUPERVISOR])) {
+  if (!hasAnyRole(resolved.user.role, [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER])) {
     return res
       .status(403)
       .json(new ApiResponse(403, {}, "error_orders_list_forbidden"));
   }
 
   const orders = await Order.find({})
+    .populate('items.product', 'name')
     .sort({ createdAt: -1 })
     .limit(100);
 
@@ -313,6 +355,19 @@ const STOCK_ERROR_I18N = {
   STOCK_PRODUCT_NOT_FOUND: "error_order_product_not_found",
   INVALID_STOCK_PRODUCT: "error_order_product_not_found",
   INVALID_STOCK_AMOUNT: "error_order_invalid_quantity"
+};
+
+// Errores que puede lanzar la emisión de vouchers al confirmar un pedido con
+// combos. Se traducen al vocabulario del pedido en vez de filtrar un 500.
+const COMBO_ERROR_I18N = {
+  COMBO_PRODUCT_NOT_FOUND: "error_order_product_not_found",
+  COMBO_CUSTOMER_PHONE_REQUIRED: "error_order_phone_required",
+  COMBO_INVALID_QUANTITY: "error_order_invalid_items",
+  COMBO_INVALID_PRICE: "error_order_invalid_amount",
+  COMBO_PAYMENT_REQUIRED: "error_order_combo_unavailable",
+  COMBO_DEFINITION_NOT_FOUND: "error_order_combo_unavailable",
+  COMBO_INACTIVE: "error_order_combo_unavailable",
+  COMBO_ALREADY_REDEEMED: "error_order_combo_unavailable"
 };
 
 const updateOrderStatus = asyncHandler(async (req, res) => {
@@ -418,6 +473,11 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     const stockErrorCode = STOCK_ERROR_I18N[error?.message];
     if (stockErrorCode) {
       return res.status(400).json(new ApiResponse(400, {}, stockErrorCode));
+    }
+
+    const comboErrorCode = COMBO_ERROR_I18N[error?.message];
+    if (comboErrorCode) {
+      return res.status(400).json(new ApiResponse(400, {}, comboErrorCode));
     }
 
     // Falla interna: se loguea arriba, pero al cliente no se le filtran detalles.

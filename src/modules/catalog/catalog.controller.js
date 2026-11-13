@@ -15,6 +15,23 @@ function toPublicPrice(price) {
     return Number.isFinite(value) ? value : 0;
 }
 
+function toPublicCategory(category) {
+    if (!category || typeof category !== "object") {
+        return null;
+    }
+
+    const name = typeof category.name === "string" ? category.name.trim() : "";
+
+    if (name === "") {
+        return null;
+    }
+
+    return {
+        id: String(category._id ?? category.id ?? ""),
+        name,
+    };
+}
+
 function toPublicProduct(product) {
     return {
         id: String(product._id),
@@ -24,6 +41,7 @@ function toPublicProduct(product) {
         image: product.imageUrl || "",
         isCombo: product.productType === 3,
         stock: product.productType === 3 ? null : Number(product.stock ?? 0),
+        category: toPublicCategory(product.category),
     };
 }
 
@@ -60,6 +78,7 @@ const getPublicProducts = asyncHandler(async (req, res) => {
             page,
             limit,
             sort: { productType: 1, name: 1 },
+            populate: { path: "category", select: "name" },
         });
 
         res.status(200).json(new ApiResponse(
@@ -92,7 +111,7 @@ const getPublicProductById = asyncHandler(async (req, res) => {
             status: 1,
             isSellable: true,
             productType: { $in: PUBLIC_PRODUCT_TYPES },
-        });
+        }).populate("category", "name");
 
         if (!product) {
             return res.status(404).json(new ApiResponse(404, {}, "error_product_not_found"));
