@@ -160,23 +160,26 @@ const getProductById = asyncHandler(async (req, res) => {
 const updateProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const { productId } = req.params;
+    const body = req.body || {};
 
     const {
         name, description, price, costPrice, stock, category,
-        sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
-        isSellable, isPurchasable
-    } = req.body;
+        sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl
+    } = body;
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
         return translateErrorResponse(res, lang, "error_product_invalid_id", 400, translations);
     }
 
-    // El stock ya no se sobrescribe desde la edición del producto: todo cambio
-    // manual pasa por un ajuste auditado.
+    // Stock is never overwritten from product edition: every manual change goes
+    // through an audited stock adjustment (same rule as before).
     if (stock !== undefined) {
         return translateErrorResponse(res, lang, "error_product_stock_requires_adjustment", 400, translations);
     }
 
+    // Client-sent isSellable/isPurchasable are intentionally ignored: visibility
+    // is derived from productType only. A body with just those flags has no
+    // valid fields to update.
     if (
         name === undefined &&
         description === undefined &&
@@ -189,46 +192,140 @@ const updateProduct = asyncHandler(async (req, res) => {
         productType === undefined &&
         purchaseUnit === undefined &&
         conversionFactor === undefined &&
-        imageUrl === undefined &&
-        isSellable === undefined &&
-        isPurchasable === undefined
+        imageUrl === undefined
     ) {
         return translateErrorResponse(res, lang, "error_product_no_fields_update", 400, translations);
     }
 
-    const updateFields = {};
+    const setFields = {};
+    const unsetFields = {};
+    const objectIdPattern = /^[0-9a-fA-F]{24}$/;
 
-    if (name !== undefined) updateFields.name = name.trim();
-    if (description !== undefined) updateFields.description = description ? description.trim() : '';
-    if (price !== undefined) updateFields.price = Number(price);
-    if (costPrice !== undefined) updateFields.costPrice = Number(costPrice);
-    if (category !== undefined) updateFields.category = category || null;
-    if (unit !== undefined) updateFields.unit = unit || null;
-    if (purchaseUnit !== undefined) updateFields.purchaseUnit = purchaseUnit || null;
-    if (productType !== undefined) {
-        const type = Number(productType);
-        updateFields.productType = type;
-        // Forzar visibilidad al actualizar el tipo
-        if (type === 0) { updateFields.isSellable = false; updateFields.isPurchasable = true; }
-        else if (type === 1) { updateFields.isSellable = true; updateFields.isPurchasable = false; }
-        else if (type === 2) { updateFields.isSellable = true; updateFields.isPurchasable = true; }
-        else if (type === 3) { updateFields.isSellable = true; updateFields.isPurchasable = false; }
+    // Accept only numbers or non-empty numeric strings. null, "" and booleans
+    // must never be coerced: Number(null) === 0 and Number(true) === 1 would
+    // silently turn them into valid values.
+    const isNumericInput = (value) =>
+        typeof value === "number" || (typeof value === "string" && value.trim() !== "");
+
+    if (name !== undefined) {
+        // Type check first so .trim() is never called on a non-string value.
+        if (typeof name !== "string" || name.trim().length === 0) {
+            return translateErrorResponse(res, lang, "error_product_name_required", 400, translations);
+        }
+        setFields.name = name.trim();
     }
-    // Si no se cambia el tipo, pero se envían casillas, usarlas (opcional, pero las reglas anteriores mandan)
-    if (isSellable !== undefined && productType === undefined) updateFields.isSellable = isSellable;
-    if (isPurchasable !== undefined && productType === undefined) updateFields.isPurchasable = isPurchasable;
 
-    if (conversionFactor !== undefined) updateFields.conversionFactor = Number(conversionFactor);
-    if (sku !== undefined) updateFields.sku = sku ? sku.trim() : undefined;
-    if (status !== undefined) updateFields.status = Number(status);
-    if (imageUrl !== undefined) updateFields.imageUrl = imageUrl;
+    if (description !== undefined) {
+        if (description !== null && typeof description !== "string") {
+            return translateErrorResponse(res, lang, "error_product_invalid_field", 400, translations);
+        }
+        setFields.description = description === null ? "" : description.trim();
+    }
+
+    if (imageUrl !== undefined) {
+        if (imageUrl !== null && typeof imageUrl !== "string") {
+            return translateErrorResponse(res, lang, "error_product_invalid_field", 400, translations);
+        }
+        setFields.imageUrl = imageUrl === null ? "" : imageUrl.trim();
+    }
+
+    if (price !== undefined) {
+        const numericPrice = isNumericInput(price) ? Number(price) : NaN;
+        if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+            return translateErrorResponse(res, lang, "error_product_invalid_price", 400, translations);
+        }
+        setFields.price = numericPrice;
+    }
+
+    if (costPrice !== undefined) {
+        const numericCostPrice = isNumericInput(costPrice) ? Number(costPrice) : NaN;
+        if (!Number.isFinite(numericCostPrice) || numericCostPrice < 0) {
+            return translateErrorResponse(res, lang, "error_product_invalid_cost_price", 400, translations);
+        }
+        setFields.costPrice = numericCostPrice;
+    }
+
+    if (conversionFactor !== undefined) {
+        const numericConversionFactor = isNumericInput(conversionFactor) ? Number(conversionFactor) : NaN;
+        if (!Number.isFinite(numericConversionFactor) || numericConversionFactor <= 0) {
+            return translateErrorResponse(res, lang, "error_product_invalid_conversion_factor", 400, translations);
+        }
+        setFields.conversionFactor = numericConversionFactor;
+    }
+
+    if (status !== undefined) {
+        const numericStatus = isNumericInput(status) ? Number(status) : NaN;
+        if (numericStatus !== 0 && numericStatus !== 1) {
+            return translateErrorResponse(res, lang, "error_product_invalid_status", 400, translations);
+        }
+        setFields.status = numericStatus;
+    }
+
+    if (category !== undefined) {
+        if (category === null || category === "") {
+            setFields.category = null;
+        } else if (typeof category === "string" && objectIdPattern.test(category)) {
+            setFields.category = category;
+        } else {
+            return translateErrorResponse(res, lang, "error_product_invalid_reference", 400, translations);
+        }
+    }
+
+    if (unit !== undefined) {
+        // unit is required in the schema: it can never be cleared, only replaced
+        // by a valid ObjectId string.
+        if (typeof unit !== "string" || !objectIdPattern.test(unit)) {
+            return translateErrorResponse(res, lang, "error_product_unit_required", 400, translations);
+        }
+        setFields.unit = unit;
+    }
+
+    if (purchaseUnit !== undefined) {
+        if (purchaseUnit === null || purchaseUnit === "") {
+            setFields.purchaseUnit = null;
+        } else if (typeof purchaseUnit === "string" && objectIdPattern.test(purchaseUnit)) {
+            setFields.purchaseUnit = purchaseUnit;
+        } else {
+            return translateErrorResponse(res, lang, "error_product_invalid_reference", 400, translations);
+        }
+    }
+
+    if (productType !== undefined) {
+        const type = isNumericInput(productType) ? Number(productType) : NaN;
+        if (!Number.isInteger(type) || ![0, 1, 2, 3].includes(type)) {
+            return translateErrorResponse(res, lang, "error_product_invalid_type", 400, translations);
+        }
+        setFields.productType = type;
+        // Visibility is derived from productType; client flags are ignored.
+        // 0: input, 1: final product, 2: direct resale, 3: combo.
+        setFields.isSellable = type !== 0;
+        setFields.isPurchasable = type !== 1 && type !== 3;
+    }
+
+    if (sku !== undefined) {
+        if (sku !== null && typeof sku !== "string") {
+            return translateErrorResponse(res, lang, "error_product_invalid_sku", 400, translations);
+        }
+        const trimmedSku = sku === null ? "" : sku.trim();
+        if (trimmedSku === "") {
+            // Use $unset so the document truly loses the field: Mongoose strips
+            // `sku: undefined` from $set.
+            unsetFields.sku = "";
+        } else {
+            setFields.sku = trimmedSku;
+        }
+    }
+
+    const updateDocument = {};
+    if (Object.keys(setFields).length > 0) updateDocument.$set = setFields;
+    if (Object.keys(unsetFields).length > 0) updateDocument.$unset = unsetFields;
 
     try {
         const updatedProduct = await Product.findByIdAndUpdate(
             productId,
-            { $set: updateFields },
+            updateDocument,
             { new: true, runValidators: true }
-        ).populate(['unit', 'createdBy']);
+        ).populate(['category', 'unit', 'createdBy']);
 
         if (!updatedProduct) {
             return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
