@@ -22,7 +22,6 @@ router.route("/")
 router.route("/:productId")
     .get(getProductById)
     .put(updateProduct)
-    .patch(updateProduct)
     .delete(deleteProduct);
 
 export default router;

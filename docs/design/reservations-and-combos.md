@@ -367,7 +367,7 @@ Fixes today's unaudited `PUT /products/:id { stock }` overwrite.
 - The update is CAS-guarded on the previously read stock, so concurrent
   adjustments cannot overwrite each other.
 - Combo products (`productType 3`) are rejected: they have no stock of their own.
-- `PUT|PATCH /products/:id` no longer accepts `stock`; it returns `400` and points
+- `PUT /products/:id` no longer accepts `stock`; it returns `400` and points
   the caller at a stock adjustment.
 - Endpoints: `POST|GET /api/v1/stock-adjustments` and
   `GET /api/v1/combo-purchases/reconciliation` (read-only drift report).
@@ -565,7 +565,7 @@ Status: **1–7 implemented and runtime-verified** against a scratch database.
      previous stock; combo products are rejected.
    - `GET /api/v1/stock-adjustments` lists adjustments with product and operator
      populated, filtered by product and reason.
-   - `PUT|PATCH /api/v1/products/:id` rejects any `stock` field with `400`; stock
+   - `PUT /api/v1/products/:id` rejects any `stock` field with `400`; stock
      only changes through sales, purchases, redemptions and adjustments.
    - `GET /api/v1/combo-purchases/reconciliation` is a read-only report that
      compares each voucher balance with its non-voided redemptions and checks the
