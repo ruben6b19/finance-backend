@@ -1,6 +1,7 @@
 import express from "express"
 import cors from "cors"
 import cookieParser from "cookie-parser"
+import { errorHandler, notFoundHandler } from "./middlewares/error.middleware.js"
 import path from "path"
 //import { fileURLToPath } from 'url';
 import fs from 'fs'
@@ -91,6 +92,10 @@ app.use("/api/v1/orders", orderRouter)
 //app.use("/api/v1/profiles", profileRouter);
 //app.use("/api/v1/accounts", accountRouter);
 //app.use("/api/v1/netflix", netflixRouter)
+
+// Order matters: catch-all 404 for unmatched routes, then the JSON error handler.
+app.use(notFoundHandler)
+app.use(errorHandler)
 
 //export { app }
 export default app;
