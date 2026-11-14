@@ -15,6 +15,7 @@ import enTranslations from './en.json' with { type: 'json' };
 //import serviceAccount from "../../serviceAccountKey.json" assert { type: "json" };
 //const serviceAccount = require("../../serviceAccountKey.json");
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import { hasRoleAtLeast } from "../../utils/roles.js";
 import {
     isAssignableRoleList,
     isHiddenUser,
@@ -1229,6 +1230,14 @@ const getWatchHistory = asyncHandler(async(req, res) => {
 
 
 const getAllUsers = asyncHandler(async (req, res) => {
+    const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
+
+    // Listar todos los usuarios es una operación administrativa. El superadmin
+    // también pasa por la jerarquía de roles.
+    if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+        return translateErrorResponse(res, lang, "error_user_list_forbidden", 403, translations);
+    }
+
     // 1. Obtener parámetros de paginación
     const page = parseInt(req.params.page) || 1; 
     const limit = parseInt(req.query.limit) || 10;

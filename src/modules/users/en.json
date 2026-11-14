@@ -2,6 +2,7 @@
     "error_user_required_fields": "Full name, email, password, role, and institute are all required fields.",
     "error_user_invalid_role": "The role must be a non-empty array of valid roles.",
     "error_user_role_not_allowed": "That role cannot be assigned from the application.",
+    "error_user_list_forbidden": "Only an administrator can list all users.",
     "error_user_auth_required": "Authentication is required to perform this action. The creating/updating user was not identified.",
     "error_user_id_required": "The User ID is required for this operation.",
     "error_user_no_fields_update": "At least one valid field (full name, email, role, status, or password) must be provided for update.",

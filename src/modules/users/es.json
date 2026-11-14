@@ -2,6 +2,7 @@
     "error_user_required_fields": "Nombre completo, correo electrónico, contraseña, rol e instituto son campos obligatorios.",
     "error_user_invalid_role": "El rol debe ser un arreglo no vacío de roles válidos.",
     "error_user_role_not_allowed": "Ese rol no se puede asignar desde la aplicación.",
+    "error_user_list_forbidden": "Solo un administrador puede listar todos los usuarios.",
     "error_user_auth_required": "Se requiere autenticación para realizar esta acción. El usuario creador/modificador no fue identificado.",
     "error_user_id_required": "El ID de usuario es obligatorio para esta operación.",
     "error_user_no_fields_update": "Se debe proporcionar al menos un campo válido (nombre, email, rol, estado o contraseña) para actualizar.",
