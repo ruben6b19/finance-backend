@@ -1,17 +1,31 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
+import { ROLES } from "../../constants/roles.js";
+import { hasRoleAtLeast } from "../../utils/roles.js";
+import { User } from "./user.model.js";
 import { resolveFirebaseUser, toPublicUser } from "./user.service.js";
 
 export const registerOrGetGoogleUser = asyncHandler(async (req, res) => {
+  const firebaseUid = req.user?.firebaseUid;
+
+  if (!firebaseUid) {
+    return res.status(401).json(new ApiResponse(401, {}, "error_token_missing_uid"));
+  }
+
+  // Las cuentas existentes siempre pueden resolver su sesión para no romper el
+  // login con Google. Solo la creación de cuentas nuevas queda restringida.
+  const existingUser = await User.findOne({ firebaseUid }).select("_id");
+
+  if (!existingUser && !hasRoleAtLeast(req, ROLES.ADMIN)) {
+    return res.status(403).json(new ApiResponse(403, {}, "error_user_creation_forbidden"));
+  }
+
   const result = await resolveFirebaseUser({
-    firebaseUid: req.user?.firebaseUid,
+    firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
   });
 
-  if (result.error === "missing_uid") {
-    return res.status(401).json(new ApiResponse(401, {}, "error_token_missing_uid"));
-  }
   if (result.error === "missing_email") {
     return res.status(400).json(new ApiResponse(400, {}, "error_user_email_required"));
   }

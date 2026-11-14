@@ -158,6 +158,13 @@ const registerUserFirebase = asyncHandler( async (req, res) => {
 const registerUser = asyncHandler(async (req, res) => {
     const { fullName, email, password, role } = req.body;
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
+
+    // Solo un administrador (o superadmin) puede crear cuentas desde la API.
+    if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+        const errorCode = "error_user_creation_forbidden";
+        return translateErrorResponse(res, lang, errorCode, 403, translations);
+    }
+
     console.log("registerUser - req.body:", req.body);
     
     // ID del usuario creador desde la sesión (Opcional)
