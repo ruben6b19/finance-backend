@@ -44,6 +44,7 @@ import { ComboRedemption } from "../src/modules/combos/comboRedemption.model.js"
 import { ComboPurchase } from "../src/modules/combos/comboPurchase.model.js";
 import { ComboComponent } from "../src/modules/combos/comboComponent.model.js";
 import { ComboDefinition } from "../src/modules/combos/comboDefinition.model.js";
+import { TenantMapping } from "../src/modules/tenants/tenantMapping.model.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -64,7 +65,8 @@ const MODELS = [
     ComboRedemption,
     ComboPurchase,
     ComboComponent,
-    ComboDefinition
+    ComboDefinition,
+    TenantMapping
 ];
 
 // MongoDB error code returned when a collection already exists.

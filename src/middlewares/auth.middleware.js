@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken"
 import { User } from "../modules/users/user.model.js";
 //import admin from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
+import { resolveTenantDbName } from "../modules/tenants/tenantMapping.service.js";
 
 export const verifyJWT = asyncHandler(async(req, _, next) => {
     try {
@@ -103,6 +104,18 @@ export const verifyFirebaseToken = async (req, res, next) => {
             picture: decodedToken.picture,
             instituteLang: decodedToken.instituteLang
         };
+
+        // Resolve which tenant database owns this user. The mapping lives in
+        // the central database; unmapped emails fall back to the central one.
+        try {
+            const dbName = await resolveTenantDbName(req.user.email);
+            req.user.dbName = dbName;
+            req.tenant = { email: req.user.email, dbName };
+        } catch (error) {
+            console.error("Tenant resolution failed:", error);
+            return next(new ApiError(503, "No se pudo resolver la tienda del usuario."));
+        }
+
         //console.log("Decoded Firebase Token:", decodedToken);    
         //console.log("authHeader:", req.headers);
         // 4. Continuar con la siguiente función del controlador
