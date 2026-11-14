@@ -421,6 +421,16 @@ const createRedemption = asyncHandler(async (req, res) => {
     }
 });
 
+// Mongo puede abortar una transacción con TransientTransactionError (contención
+// de locks o cambios de catálogo). El contrato de Mongo es reintentarla: no es
+// un conflicto del cliente. Un commit con resultado incierto NO se reintenta,
+// porque la transacción pudo haberse aplicado.
+const VOID_TX_MAX_ATTEMPTS = 3;
+
+const isRetryableTransactionError = (error) =>
+    error?.hasErrorLabel?.('TransientTransactionError') &&
+    !error?.hasErrorLabel?.('UnknownTransactionCommitResult');
+
 const voidRedemption = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const { comboPurchaseId, redemptionId } = req.params;
@@ -442,135 +452,146 @@ const voidRedemption = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_redemption_not_found", 404, translations);
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    for (let attempt = 1; attempt <= VOID_TX_MAX_ATTEMPTS; attempt += 1) {
+        const session = await mongoose.startSession();
+        session.startTransaction();
 
-    try {
-        const voucher = await resolveVoucher(comboPurchaseId, session);
-        if (!voucher) {
-            await session.abortTransaction();
-            session.endSession();
-            return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
-        }
+        try {
+            const voucher = await resolveVoucher(comboPurchaseId, session);
+            if (!voucher) {
+                await session.abortTransaction();
+                session.endSession();
+                return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
+            }
 
-        const redemption = await ComboRedemption.findOne({
-            _id: redemptionId,
-            comboPurchase: voucher._id
-        }).session(session);
+            const redemption = await ComboRedemption.findOne({
+                _id: redemptionId,
+                comboPurchase: voucher._id
+            }).session(session);
 
-        if (!redemption) {
-            await session.abortTransaction();
-            session.endSession();
-            return translateErrorResponse(res, lang, "error_redemption_not_found", 404, translations);
-        }
+            if (!redemption) {
+                await session.abortTransaction();
+                session.endSession();
+                return translateErrorResponse(res, lang, "error_redemption_not_found", 404, translations);
+            }
 
-        // b. Ventana de anulación: se mide sobre la fecha del canje original.
-        const voidCheck = checkRedemptionVoidWindow({
-            redeemedAt: redemption.redeemedAt,
-            roles: normalizeRoles(req.user?.role)
-        });
+            // b. Ventana de anulación: se mide sobre la fecha del canje original.
+            const voidCheck = checkRedemptionVoidWindow({
+                redeemedAt: redemption.redeemedAt,
+                roles: normalizeRoles(req.user?.role)
+            });
 
-        if (!voidCheck.allowed) {
-            await session.abortTransaction();
-            session.endSession();
-            return translateErrorResponse(res, lang, voidCheck.errorCode, 403, translations);
-        }
+            if (!voidCheck.allowed) {
+                await session.abortTransaction();
+                session.endSession();
+                return translateErrorResponse(res, lang, voidCheck.errorCode, 403, translations);
+            }
 
-        // c. Reclamo atómico: dos anulaciones no pueden restaurar stock dos veces.
-        const now = new Date();
-        const claimed = await ComboRedemption.findOneAndUpdate(
-            { _id: redemptionId, comboPurchase: voucher._id, voidedAt: null },
-            {
-                $set: {
-                    voidedAt: now,
-                    voidedBy: req.user?.mongoDbId || null,
-                    voidReason: reason
-                }
-            },
-            { new: true, session }
-        );
-
-        if (!claimed) {
-            await session.abortTransaction();
-            session.endSession();
-            return translateErrorResponse(res, lang, "error_redemption_already_voided", 400, translations);
-        }
-
-        const balanceByProduct = new Map();
-        for (const balance of voucher.balances || []) {
-            balanceByProduct.set(String(balance.product), balance);
-        }
-
-        // d. Restaurar solo el stock que el canje había descontado.
-        for (const item of claimed.items) {
-            const balance = balanceByProduct.get(String(item.product));
-            if (!balance || !balance.stockProduct) continue;
-
-            const amount = toNumber(item.quantity) * toNumber(balance.conversionFactor ?? 1);
-            if (!Number.isFinite(amount) || amount <= 0) continue;
-
-            await Product.updateOne(
-                { _id: balance.stockProduct },
-                { $inc: { stock: amount } },
-                { session }
+            // c. Reclamo atómico: dos anulaciones no pueden restaurar stock dos veces.
+            const now = new Date();
+            const claimed = await ComboRedemption.findOneAndUpdate(
+                { _id: redemptionId, comboPurchase: voucher._id, voidedAt: null },
+                {
+                    $set: {
+                        voidedAt: now,
+                        voidedBy: req.user?.mongoDbId || null,
+                        voidReason: reason
+                    }
+                },
+                { new: true, session }
             );
+
+            if (!claimed) {
+                await session.abortTransaction();
+                session.endSession();
+                return translateErrorResponse(res, lang, "error_redemption_already_voided", 400, translations);
+            }
+
+            const balanceByProduct = new Map();
+            for (const balance of voucher.balances || []) {
+                balanceByProduct.set(String(balance.product), balance);
+            }
+
+            // d. Restaurar solo el stock que el canje había descontado.
+            for (const item of claimed.items) {
+                const balance = balanceByProduct.get(String(item.product));
+                if (!balance || !balance.stockProduct) continue;
+
+                const amount = toNumber(item.quantity) * toNumber(balance.conversionFactor ?? 1);
+                if (!Number.isFinite(amount) || amount <= 0) continue;
+
+                await Product.updateOne(
+                    { _id: balance.stockProduct },
+                    { $inc: { stock: amount } },
+                    { session }
+                );
+            }
+
+            const restoredByProduct = buildItemsMap(claimed.items);
+            const newBalances = (voucher.balances || []).map((balance) => {
+                const base = balance.toObject ? balance.toObject() : { ...balance };
+                const restored = restoredByProduct.get(String(balance.product)) || 0;
+                const reduced = toNumber(balance.usedQty) - restored;
+                return {
+                    ...base,
+                    usedQty: reduced < 1e-9 ? 0 : round6(reduced)
+                };
+            });
+
+            const totalRestored = claimed.items.reduce((sum, item) => sum + toNumber(item.quantity), 0);
+            const reducedUsedUnits = toNumber(voucher.usedUnits) - totalRestored;
+            const newUsedUnits = reducedUsedUnits < 1e-9 ? 0 : round6(reducedUsedUnits);
+
+            // Un voucher agotado vuelve a estar activo; expired/cancelled no se tocan.
+            const reopening = Number(voucher.status) === 1;
+
+            const updatedVoucher = await ComboPurchase.findOneAndUpdate(
+                { _id: voucher._id, usedUnits: voucher.usedUnits },
+                {
+                    $set: {
+                        balances: newBalances,
+                        usedUnits: newUsedUnits,
+                        status: reopening ? 0 : voucher.status,
+                        closedAt: reopening ? null : voucher.closedAt
+                    }
+                },
+                { new: true, session }
+            );
+
+            if (!updatedVoucher) {
+                throw new Error("REDEMPTION_CONFLICT");
+            }
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json(
+                new ApiResponse(
+                    200,
+                    { redemption: claimed, comboPurchase: updatedVoucher },
+                    translations[lang]?.success_redemption_voided || "success_redemption_voided"
+                )
+            );
+        } catch (error) {
+            try {
+                await session.abortTransaction();
+            } catch {
+                // El servidor pudo haber abortado la transacción antes.
+            }
+            session.endSession();
+
+            if (isRetryableTransactionError(error) && attempt < VOID_TX_MAX_ATTEMPTS) {
+                continue;
+            }
+
+            console.error("Error voiding combo redemption:", error);
+
+            if (error?.message === "REDEMPTION_CONFLICT") {
+                return translateErrorResponse(res, lang, "error_redemption_conflict", 409, translations);
+            }
+
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
         }
-
-        const restoredByProduct = buildItemsMap(claimed.items);
-        const newBalances = (voucher.balances || []).map((balance) => {
-            const base = balance.toObject ? balance.toObject() : { ...balance };
-            const restored = restoredByProduct.get(String(balance.product)) || 0;
-            const reduced = toNumber(balance.usedQty) - restored;
-            return {
-                ...base,
-                usedQty: reduced < 1e-9 ? 0 : round6(reduced)
-            };
-        });
-
-        const totalRestored = claimed.items.reduce((sum, item) => sum + toNumber(item.quantity), 0);
-        const reducedUsedUnits = toNumber(voucher.usedUnits) - totalRestored;
-        const newUsedUnits = reducedUsedUnits < 1e-9 ? 0 : round6(reducedUsedUnits);
-
-        // Un voucher agotado vuelve a estar activo; expired/cancelled no se tocan.
-        const reopening = Number(voucher.status) === 1;
-
-        const updatedVoucher = await ComboPurchase.findOneAndUpdate(
-            { _id: voucher._id, usedUnits: voucher.usedUnits },
-            {
-                $set: {
-                    balances: newBalances,
-                    usedUnits: newUsedUnits,
-                    status: reopening ? 0 : voucher.status,
-                    closedAt: reopening ? null : voucher.closedAt
-                }
-            },
-            { new: true, session }
-        );
-
-        if (!updatedVoucher) {
-            throw new Error("REDEMPTION_CONFLICT");
-        }
-
-        await session.commitTransaction();
-        session.endSession();
-
-        return res.status(200).json(
-            new ApiResponse(
-                200,
-                { redemption: claimed, comboPurchase: updatedVoucher },
-                translations[lang]?.success_redemption_voided || "success_redemption_voided"
-            )
-        );
-    } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        console.error("Error voiding combo redemption:", error);
-
-        if (error?.message === "REDEMPTION_CONFLICT" || error?.hasErrorLabel?.('TransientTransactionError')) {
-            return translateErrorResponse(res, lang, "error_redemption_conflict", 409, translations);
-        }
-
-        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }
 });
 
