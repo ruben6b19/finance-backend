@@ -113,7 +113,12 @@ const getComboPurchases = asyncHandler(async (req, res) => {
             page: parseInt(pageParam) || 1,
             limit: parseInt(limit) || 10,
             sort: { purchasedAt: -1 },
-            populate: ['comboProduct', 'createdBy']
+            populate: [
+                'comboProduct',
+                'createdBy',
+                // El cliente muestra el nombre del componente, no su ObjectId.
+                { path: 'balances.product', select: 'name' }
+            ]
         });
 
         return res.status(200).json(
@@ -144,7 +149,13 @@ const getComboPurchaseById = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
         }
 
-        await voucher.populate(['comboProduct', 'comboDefinition', 'createdBy']);
+        await voucher.populate([
+            'comboProduct',
+            'comboDefinition',
+            'createdBy',
+            // El cliente muestra el nombre del componente, no su ObjectId.
+            { path: 'balances.product', select: 'name' }
+        ]);
 
         return res.status(200).json(
             new ApiResponse(200, voucher, translations[lang]?.success_combo_purchase_fetched || "success_combo_purchase_fetched")
@@ -170,6 +181,8 @@ const getComboPurchaseRedemptions = asyncHandler(async (req, res) => {
         const redemptions = await ComboRedemption.find({ comboPurchase: voucher._id })
             .sort({ redeemedAt: -1 })
             .limit(100)
+            // El historial muestra el nombre del componente, no su ObjectId.
+            .populate('items.product', 'name')
             .lean();
 
         return res.status(200).json(
@@ -185,6 +198,11 @@ const createRedemption = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const { comboPurchaseId } = req.params;
     const { idempotencyKey, items, notes } = req.body || {};
+
+    // Canje operativo: lo registra el personal de mostrador, nunca un cliente.
+    if (!hasRole(req, [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER])) {
+        return translateErrorResponse(res, lang, "error_redemption_not_allowed", 403, translations);
+    }
 
     // a. El voucher debe existir.
     const voucher = await resolveVoucher(comboPurchaseId);

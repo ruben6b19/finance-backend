@@ -35,6 +35,7 @@
     "error_redemption_already_voided": "The redemption was already voided.",
     "error_redemption_void_reason_required": "A reason is required to void the redemption.",
     "error_redemption_forbidden": "Only an administrator or supervisor can void a redemption.",
+    "error_redemption_not_allowed": "Only authorized staff can register redemptions.",
     "success_redemption_created": "Redemption created successfully.",
     "success_redemption_voided": "Redemption voided successfully.",
     "success_combo_purchases_fetched": "Combo purchases fetched successfully.",
