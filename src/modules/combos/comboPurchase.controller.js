@@ -4,8 +4,8 @@ import { ComboPurchase } from "./comboPurchase.model.js";
 import { ComboRedemption } from "./comboRedemption.model.js";
 import { Product } from "../products/product.model.js";
 import { ROLES } from "../../constants/roles.js";
-import { hasRole, normalizeRoles } from "../../utils/roles.js";
-import { REDEMPTION_VOID_ROLES, checkRedemptionVoidWindow } from "./redemption.policy.js";
+import { hasRoleAtLeast, normalizeRoles } from "../../utils/roles.js";
+import { checkRedemptionVoidWindow } from "./redemption.policy.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -195,7 +195,7 @@ const createRedemption = asyncHandler(async (req, res) => {
     const { idempotencyKey, items, notes } = req.body || {};
 
     // Canje operativo: lo registra el personal de mostrador, nunca un cliente.
-    if (!hasRole(req, [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER])) {
+    if (!hasRoleAtLeast(req, ROLES.SELLER)) {
         return translateErrorResponse(res, lang, "error_redemption_not_allowed", 403, translations);
     }
 
@@ -428,7 +428,7 @@ const voidRedemption = asyncHandler(async (req, res) => {
 
     // a. Anulación de un canje: el vendedor solo el mismo día; supervisor y
     // admin hasta 7 días. Se mide sobre la fecha del canje.
-    if (!hasRole(req, REDEMPTION_VOID_ROLES)) {
+    if (!hasRoleAtLeast(req, ROLES.SELLER)) {
         return translateErrorResponse(res, lang, "error_redemption_forbidden", 403, translations);
     }
 

@@ -2,6 +2,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { runExpirySweep as executeExpirySweep } from "./expiry.service.js";
 import { ROLES } from "../../constants/roles.js";
+import { hasRoleAtLeast } from "../../utils/roles.js";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
@@ -15,18 +16,11 @@ const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
 };
 
-const hasRole = (req, allowedRoles) => {
-    const roles = req.user?.role;
-    if (roles === undefined || roles === null) return false;
-    const list = Array.isArray(roles) ? roles : [roles];
-    return list.some((role) => allowedRoles.includes(Number(role)));
-};
-
 const runExpirySweep = asyncHandler(async (req, res) => {
     const lang = getLang(req);
 
     // Barrido administrativo: expira promesas vencidas, nunca mueve stock ni dinero.
-    if (!hasRole(req, [ROLES.ADMIN, ROLES.SUPERVISOR])) {
+    if (!hasRoleAtLeast(req, ROLES.SUPERVISOR)) {
         return translateErrorResponse(res, lang, "error_expiry_sweep_forbidden", 403, translations);
     }
 

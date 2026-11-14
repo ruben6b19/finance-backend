@@ -18,6 +18,7 @@ let replSet;
 const TEST_TIMEOUT = 20000;
 const itDb = (name, fn) => it(name, fn, TEST_TIMEOUT);
 
+const SUPERADMIN = [-1];
 const ADMIN = [0];
 const SUPERVISOR = [1];
 const SELLER = [2];
@@ -110,6 +111,14 @@ describe("sale modification policy", () => {
                 errorCode: "error_sale_edit_window_expired"
             });
         }
+    });
+
+    itDb("gives the superadmin the same 7 day window as an admin", () => {
+        expect(check("2026-11-07T10:00:00.000Z", SUPERADMIN).allowed).toBe(true);
+        expect(check("2026-11-06T10:00:00.000Z", SUPERADMIN)).toMatchObject({
+            allowed: false,
+            errorCode: "error_sale_edit_window_expired"
+        });
     });
 
     itDb("measures calendar days in Bolivia time, not UTC", () => {
@@ -208,6 +217,22 @@ describe("sale role gate", () => {
         expect(statusCode).toBe(201);
         expect(await Sale.countDocuments()).toBe(1);
     });
+
+    itDb("lets a superadmin create a sale", async () => {
+        const { statusCode } = await call(
+            createSale,
+            request({
+                user: withRole(SUPERADMIN),
+                body: {
+                    totalAmount: 10,
+                    transactionCategory: new mongoose.Types.ObjectId().toString()
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+        expect(await Sale.countDocuments()).toBe(1);
+    });
 });
 
 describe("sale modification window", () => {
@@ -271,6 +296,20 @@ describe("sale modification window", () => {
         const { statusCode } = await call(
             updateSale,
             request({ params: { saleId: String(sale._id) }, user: withRole(SUPERVISOR), body: { notes: "editada" } })
+        );
+
+        expect(statusCode).toBe(200);
+    });
+
+    itDb("lets a superadmin change the sale date", async () => {
+        const sale = await createSaleDoc(3);
+        const { statusCode } = await call(
+            updateSale,
+            request({
+                params: { saleId: String(sale._id) },
+                user: withRole(SUPERADMIN),
+                body: { saleDate: new Date().toISOString() }
+            })
         );
 
         expect(statusCode).toBe(200);

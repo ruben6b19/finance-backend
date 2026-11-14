@@ -6,6 +6,7 @@ import { Product } from "../products/product.model.js";
 import { Transaction } from "../transactions/transaction.model.js";
 import { applyStockMovement, createSaleRecord } from "../sales/sale.service.js";
 import { ROLES } from "../../constants/roles.js";
+import { hasRoleAtLeast } from "../../utils/roles.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -34,13 +35,6 @@ const toNumber = (value) => {
 };
 
 const round2 = (value) => Math.round(value * 100) / 100;
-
-const hasRole = (req, allowedRoles) => {
-    const roles = req.user?.role;
-    if (roles === undefined || roles === null) return false;
-    const list = Array.isArray(roles) ? roles : [roles];
-    return list.some((role) => allowedRoles.includes(Number(role)));
-};
 
 const createReservation = asyncHandler(async (req, res) => {
     const lang = getLang(req);
@@ -322,7 +316,7 @@ const voidReservation = asyncHandler(async (req, res) => {
     }
 
     // Reversión administrativa, no devolución al cliente: solo supervisión.
-    if (!hasRole(req, [ROLES.ADMIN, ROLES.SUPERVISOR])) {
+    if (!hasRoleAtLeast(req, ROLES.SUPERVISOR)) {
         return translateErrorResponse(res, lang, "error_reservation_forbidden", 403, translations);
     }
 

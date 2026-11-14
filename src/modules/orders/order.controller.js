@@ -3,6 +3,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { validateDescriptionAddress, validateName } from "../../utils/regex.js";
 import { ROLES } from "../../constants/roles.js";
+import { roleAtLeast } from "../../utils/roles.js";
 import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { User } from "../users/user.model.js";
@@ -18,14 +19,6 @@ const MAX_ITEMS = 50;
 const MAX_DAYS_AHEAD = 30;
 const MAX_NOTES = 300;
 const PHONE_REGEX = /^[+()\d\s-]{6,25}$/;
-
-/** Roles whose profile is managed by an administrator, never by the storefront. */
-const STAFF_ROLES = [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
-
-const toRoleList = (role) => (Array.isArray(role) ? role : [role]).map(Number);
-
-const hasAnyRole = (role, allowed) =>
-  toRoleList(role).some((value) => allowed.includes(value));
 
 const toNumber = (value) => {
   if (value === undefined || value === null) return 0;
@@ -233,7 +226,7 @@ const createOrder = asyncHandler(async (req, res) => {
   //    customerPhone, customerEmail), so editing the profile later never
   //    rewrites past orders. Staff profiles are managed by an administrator
   //    and must not be renamed from the storefront checkout.
-  if (!hasAnyRole(resolved.user.role, STAFF_ROLES)) {
+  if (!roleAtLeast(resolved.user.role, ROLES.SELLER)) {
     const profilePatch = {};
 
     if (rawContactName !== resolved.user.fullName) {
@@ -336,7 +329,7 @@ const getAllOrders = asyncHandler(async (req, res) => {
   // Only staff may list every order. Clients see their own via GET /orders/me.
   // Read the role from the Mongo user, not from req.user: Firebase custom claims
   // are not set for storefront clients, so hasRole(req, ...) would deny everyone.
-  if (!hasAnyRole(resolved.user.role, [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER])) {
+  if (!roleAtLeast(resolved.user.role, ROLES.SELLER)) {
     return res
       .status(403)
       .json(new ApiResponse(403, {}, "error_orders_list_forbidden"));
@@ -390,7 +383,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   });
   if (resolved.error) return respondUserError(res, resolved);
 
-  if (!hasAnyRole(resolved.user.role, [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER])) {
+  if (!roleAtLeast(resolved.user.role, ROLES.SELLER)) {
     return res.status(403).json(new ApiResponse(403, {}, "error_orders_status_forbidden"));
   }
 

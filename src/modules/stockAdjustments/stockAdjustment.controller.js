@@ -3,6 +3,7 @@ import { ApiResponse } from "../../utils/ApiResponse.js";
 import { Product } from "../products/product.model.js";
 import { StockAdjustment } from "./stockAdjustment.model.js";
 import { ROLES } from "../../constants/roles.js";
+import { hasRoleAtLeast } from "../../utils/roles.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -15,13 +16,6 @@ const translations = {
 
 const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
-};
-
-const hasRole = (req, allowedRoles) => {
-    const roles = req.user?.role;
-    if (roles === undefined || roles === null) return false;
-    const list = Array.isArray(roles) ? roles : [roles];
-    return list.some((role) => allowedRoles.includes(Number(role)));
 };
 
 // Product.stock es Number, pero otros orígenes pueden entregar Decimal128.
@@ -37,7 +31,7 @@ const createStockAdjustment = asyncHandler(async (req, res) => {
     const { product, newStock, delta, reason, note } = req.body || {};
 
     // a. Corrección administrativa: mismo criterio que anular un canje.
-    if (!hasRole(req, [ROLES.ADMIN, ROLES.SUPERVISOR])) {
+    if (!hasRoleAtLeast(req, ROLES.SUPERVISOR)) {
         return translateErrorResponse(res, lang, "error_stock_adjustment_forbidden", 403, translations);
     }
 

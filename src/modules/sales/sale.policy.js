@@ -1,15 +1,17 @@
 import { ROLES } from "../../constants/roles.js";
 import { daysElapsedInBolivia } from "../../utils/boliviaTime.js";
+import { roleAtLeast } from "../../utils/roles.js";
 
 // Roles que pueden crear, editar, anular o eliminar una venta.
-export const SALE_STAFF_ROLES = [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
+export const SALE_STAFF_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
 
 // Días calendario hacia atrás en los que se permite modificar una venta.
 // 0 => solo el mismo día.
 export const SALE_EDIT_WINDOW_DAYS = {
     [ROLES.SELLER]: 0,
     [ROLES.SUPERVISOR]: 7,
-    [ROLES.ADMIN]: 7
+    [ROLES.ADMIN]: 7,
+    [ROLES.SUPERADMIN]: 7
 };
 
 /**
@@ -65,7 +67,8 @@ export const checkSaleModificationWindow = ({ saleDate, roles = [], now = new Da
 };
 
 /**
- * Cambiar la fecha de una venta afecta reportes y caja: solo supervisor o admin.
+ * Cambiar la fecha de una venta afecta reportes y caja: solo supervisor, admin
+ * o superadmin.
  */
 export const canChangeSaleDate = (roles = []) =>
-    roles.includes(ROLES.ADMIN) || roles.includes(ROLES.SUPERVISOR);
+    roleAtLeast(roles, ROLES.SUPERVISOR);

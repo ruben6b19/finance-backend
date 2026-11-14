@@ -9,9 +9,9 @@ import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
 import { applyStockMovement, createSaleRecord, STOCK_ERROR_CODES } from "./sale.service.js";
 import { cancelComboVouchersForSale, COMBO_VOUCHER_ERROR_CODES } from "../combos/comboPurchase.service.js";
-import { hasRole, normalizeRoles } from "../../utils/roles.js";
+import { ROLES } from "../../constants/roles.js";
+import { hasRoleAtLeast, normalizeRoles } from "../../utils/roles.js";
 import {
-    SALE_STAFF_ROLES,
     canChangeSaleDate,
     checkSaleModificationWindow
 } from "./sale.policy.js";
@@ -29,7 +29,7 @@ const createSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
 
     // Solo el personal de tienda puede registrar ventas.
-    if (!hasRole(req, SALE_STAFF_ROLES)) {
+    if (!hasRoleAtLeast(req, ROLES.SELLER)) {
         return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
     }
 
@@ -222,7 +222,7 @@ const updateSale = asyncHandler(async (req, res) => {
     const { saleId } = req.params;
 
     // Solo el personal de tienda puede modificar ventas.
-    if (!hasRole(req, SALE_STAFF_ROLES)) {
+    if (!hasRoleAtLeast(req, ROLES.SELLER)) {
         return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
     }
 
@@ -347,7 +347,7 @@ const deleteSale = asyncHandler(async (req, res) => {
     const { saleId } = req.params;
 
     // Solo el personal de tienda puede eliminar ventas.
-    if (!hasRole(req, SALE_STAFF_ROLES)) {
+    if (!hasRoleAtLeast(req, ROLES.SELLER)) {
         return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
     }
 
@@ -492,7 +492,7 @@ const cancelSale = asyncHandler(async (req, res) => {
   const { saleId } = req.params;
 
   // Solo el personal de tienda puede anular ventas.
-  if (!hasRole(req, SALE_STAFF_ROLES)) {
+  if (!hasRoleAtLeast(req, ROLES.SELLER)) {
     return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
   }
 

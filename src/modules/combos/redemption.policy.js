@@ -2,14 +2,15 @@ import { ROLES } from "../../constants/roles.js";
 import { daysElapsedInBolivia } from "../../utils/boliviaTime.js";
 
 // Roles que pueden anular un canje. El vendedor solo el mismo día.
-export const REDEMPTION_VOID_ROLES = [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
+export const REDEMPTION_VOID_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
 
 // Días calendario hacia atrás en los que se permite anular un canje.
 // 0 => solo el mismo día.
 export const REDEMPTION_VOID_WINDOW_DAYS = {
     [ROLES.SELLER]: 0,
     [ROLES.SUPERVISOR]: 7,
-    [ROLES.ADMIN]: 7
+    [ROLES.ADMIN]: 7,
+    [ROLES.SUPERADMIN]: 7
 };
 
 /**

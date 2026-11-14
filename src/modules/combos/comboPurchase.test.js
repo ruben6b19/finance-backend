@@ -227,6 +227,20 @@ describe("createRedemption role gate", () => {
         expect(statusCode).toBe(404);
         expect(payload.message).toBe("Comprobante de combo no encontrado.");
     });
+
+    it("lets a superadmin through the gate", async () => {
+        const { statusCode, payload } = await call(
+            createRedemption,
+            request({
+                params: { comboPurchaseId: new mongoose.Types.ObjectId().toString() },
+                user: { mongoDbId: new mongoose.Types.ObjectId(), role: [-1] },
+                body: { idempotencyKey: "superadmin-key", items: [] }
+            })
+        );
+
+        expect(statusCode).toBe(404);
+        expect(payload.message).toBe("Comprobante de combo no encontrado.");
+    });
 });
 
 const BOLIVIA_OFFSET_MS = 4 * 60 * 60 * 1000;
@@ -339,6 +353,17 @@ describe("void redemption window", () => {
         const { statusCode } = await call(
             voidRedemption,
             voidRequest(code, redemption._id, [0])
+        );
+
+        expect(statusCode).toBe(200);
+    });
+
+    it("lets a superadmin void a redemption from seven days ago", async () => {
+        const { redemption, code } = await seedVoucherWithRedemption(7);
+
+        const { statusCode } = await call(
+            voidRedemption,
+            voidRequest(code, redemption._id, [-1])
         );
 
         expect(statusCode).toBe(200);
