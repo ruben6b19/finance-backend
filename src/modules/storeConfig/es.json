@@ -1,0 +1,6 @@
+{
+    "error_store_config_not_found": "La configuración de la tienda todavía no fue aprovisionada.",
+    "success_store_config_fetched": "Configuración de la tienda obtenida exitosamente.",
+
+    "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
+}

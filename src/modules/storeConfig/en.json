@@ -1,0 +1,6 @@
+{
+    "error_store_config_not_found": "The store configuration has not been provisioned yet.",
+    "success_store_config_fetched": "Store configuration fetched successfully.",
+
+    "error_internal_server_generic": "An unexpected server error occurred."
+}
