@@ -11,6 +11,7 @@
     "create:superadmin": "node scripts/create-superadmin.js",
     "expire:stale": "node scripts/expire-stale.js",
     "provision:store": "node scripts/provision-store.js",
+    "db:create": "node scripts/create-atlas-database.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest"
   },
   "keywords": [
