@@ -4,6 +4,8 @@ import { ComboPurchase } from "./comboPurchase.model.js";
 import { ComboRedemption } from "./comboRedemption.model.js";
 import { Product } from "../products/product.model.js";
 import { ROLES } from "../../constants/roles.js";
+import { hasRole, normalizeRoles } from "../../utils/roles.js";
+import { REDEMPTION_VOID_ROLES, checkRedemptionVoidWindow } from "./redemption.policy.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -16,13 +18,6 @@ const translations = {
 
 const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
-};
-
-const hasRole = (req, allowedRoles) => {
-    const roles = req.user?.role;
-    if (roles === undefined || roles === null) return false;
-    const list = Array.isArray(roles) ? roles : [roles];
-    return list.some((role) => allowedRoles.includes(Number(role)));
 };
 
 const round6 = (value) => Math.round(Number(value) * 1e6) / 1e6;
@@ -431,8 +426,9 @@ const voidRedemption = asyncHandler(async (req, res) => {
     const { comboPurchaseId, redemptionId } = req.params;
     const { voidReason } = req.body || {};
 
-    // a. Reversión administrativa: mismo criterio que anular una reserva.
-    if (!hasRole(req, [ROLES.ADMIN, ROLES.SUPERVISOR])) {
+    // a. Anulación de un canje: el vendedor solo el mismo día; supervisor y
+    // admin hasta 7 días. Se mide sobre la fecha del canje.
+    if (!hasRole(req, REDEMPTION_VOID_ROLES)) {
         return translateErrorResponse(res, lang, "error_redemption_forbidden", 403, translations);
     }
 
@@ -466,6 +462,18 @@ const voidRedemption = asyncHandler(async (req, res) => {
             await session.abortTransaction();
             session.endSession();
             return translateErrorResponse(res, lang, "error_redemption_not_found", 404, translations);
+        }
+
+        // b. Ventana de anulación: se mide sobre la fecha del canje original.
+        const voidCheck = checkRedemptionVoidWindow({
+            redeemedAt: redemption.redeemedAt,
+            roles: normalizeRoles(req.user?.role)
+        });
+
+        if (!voidCheck.allowed) {
+            await session.abortTransaction();
+            session.endSession();
+            return translateErrorResponse(res, lang, voidCheck.errorCode, 403, translations);
         }
 
         // c. Reclamo atómico: dos anulaciones no pueden restaurar stock dos veces.
