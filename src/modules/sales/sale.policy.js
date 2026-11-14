@@ -1,8 +1,5 @@
 import { ROLES } from "../../constants/roles.js";
-
-// Bolivia es UTC-4 durante todo el año (no aplica horario de verano).
-const BOLIVIA_OFFSET_MS = 4 * 60 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { daysElapsedInBolivia } from "../../utils/boliviaTime.js";
 
 // Roles que pueden crear, editar, anular o eliminar una venta.
 export const SALE_STAFF_ROLES = [ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
@@ -15,25 +12,13 @@ export const SALE_EDIT_WINDOW_DAYS = {
     [ROLES.ADMIN]: 7
 };
 
-// Número de día (UTC) que representa la fecha calendario en Bolivia.
-const boliviaDayNumber = (value) => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return null;
-    const shifted = new Date(date.getTime() - BOLIVIA_OFFSET_MS);
-    return Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
-};
-
 /**
  * Días calendario transcurridos en Bolivia entre `saleDate` y `now`.
  * Negativo cuando la venta tiene fecha futura.
  * @returns {number|null} null si la fecha no es válida.
  */
-export const saleDaysElapsed = (saleDate, now = new Date()) => {
-    const saleDay = boliviaDayNumber(saleDate);
-    const today = boliviaDayNumber(now);
-    if (saleDay === null || today === null) return null;
-    return Math.round((today - saleDay) / DAY_MS);
-};
+export const saleDaysElapsed = (saleDate, now = new Date()) =>
+    daysElapsedInBolivia(saleDate, now);
 
 /**
  * Ventana más amplia que le corresponde al usuario según sus roles.
