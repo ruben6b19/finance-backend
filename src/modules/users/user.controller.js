@@ -15,6 +15,13 @@ import enTranslations from './en.json' with { type: 'json' };
 //import serviceAccount from "../../serviceAccountKey.json" assert { type: "json" };
 //const serviceAccount = require("../../serviceAccountKey.json");
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import {
+    isAssignableRoleList,
+    isHiddenUser,
+    toClientRoleList,
+    visibleRoleFilter,
+    visibleUserFilter
+} from "./user.policy.js";
 //import { initializeApp, cert } from "firebase-admin/app";
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 
@@ -77,6 +84,12 @@ const registerUserFirebase = asyncHandler( async (req, res) => {
     // Validación de roles (400)
     if (!role || !Array.isArray(role) || role.length === 0) {
         const errorCode = "error_user_invalid_role";
+        return translateErrorResponse(res, lang, errorCode, 400, translations);
+    }
+
+    // El superadmin solo se crea por script de bootstrap, nunca por la API.
+    if (!isAssignableRoleList(role)) {
+        const errorCode = "error_user_role_not_allowed";
         return translateErrorResponse(res, lang, errorCode, 400, translations);
     }
 
@@ -163,6 +176,12 @@ const registerUser = asyncHandler(async (req, res) => {
     // 2. Validación de roles
     if (!role || !Array.isArray(role) || role.length === 0) {
         const errorCode = "error_user_invalid_role";
+        return translateErrorResponse(res, lang, errorCode, 400, translations);
+    }
+
+    // El superadmin solo se crea por script de bootstrap, nunca por la API.
+    if (!isAssignableRoleList(role)) {
+        const errorCode = "error_user_role_not_allowed";
         return translateErrorResponse(res, lang, errorCode, 400, translations);
     }
 
@@ -254,9 +273,10 @@ const updateUser = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, errorCode, 400, translations);
     }
 
-    // 3. Buscar el usuario existente
+    // 3. Buscar el usuario existente. Las cuentas internas se comportan como
+    // inexistentes para la API.
     const userToUpdate = await User.findById(userId);
-    if (!userToUpdate) {
+    if (!userToUpdate || isHiddenUser(userToUpdate)) {
         const errorCode = "error_user_not_found";
         return translateErrorResponse(res, lang, errorCode, 404, translations);
     }
@@ -289,6 +309,11 @@ const updateUser = asyncHandler(async (req, res) => {
     if (role !== undefined) {
         if (!Array.isArray(role) || role.length === 0) {
             const errorCode = "error_user_invalid_role";
+            return translateErrorResponse(res, lang, errorCode, 400, translations);
+        }
+        // El superadmin no se puede asignar desde la app.
+        if (!isAssignableRoleList(role)) {
+            const errorCode = "error_user_role_not_allowed";
             return translateErrorResponse(res, lang, errorCode, 400, translations);
         }
         mongoUpdateFields.role = role;
@@ -475,10 +500,11 @@ const deleteUser = asyncHandler( async (req, res) => {
         return translateErrorResponse(res, lang, errorCode, 401, translations);
     }
 
-    // 4. Buscar el usuario existente en MongoDB (404)
+    // 4. Buscar el usuario existente en MongoDB (404). Las cuentas internas se
+    // comportan como inexistentes para la API.
     const userToDelete = await User.findById(userId);
 
-    if (!userToDelete) {
+    if (!userToDelete || isHiddenUser(userToDelete)) {
         const errorCode = "error_user_not_found";
         return translateErrorResponse(res, lang, errorCode, 404, translations);
     }
@@ -546,13 +572,9 @@ const getUsersByInstitute = asyncHandler(async (req, res) => {
     const pageNumber = parseInt(page) || 1;
     const limitNumber = parseInt(limit) || 50;
 
-    // 2. Construcción del Filtro Base
-    const filter = { institute: instituteId };
-
-    // 3. Filtro de Rol (Soporta el role=0 que envía tu cliente)
-    if (role !== undefined && role !== "") {
-        filter.role = parseInt(role);
-    }
+    // 2. Construcción del Filtro Base. El filtro de rol excluye siempre las
+    // cuentas internas, incluso si el cliente pide explícitamente el rol -1.
+    const filter = { institute: instituteId, role: visibleRoleFilter(role) };
 
     // 4. Incorporación del Query de Búsqueda
     // Aceptamos tanto 'query' como 'search' para mayor compatibilidad
@@ -652,7 +674,9 @@ const verifyIdToken = asyncHandler(async (req, res) => {
                         _id: mongoDbId,
                         email: user.email,
                         fullName: user.fullName,
-                        role: user.role
+                        // La app Android no conoce el rol interno: se presenta
+                        // como admin. El JWT conserva el rol real.
+                        role: toClientRoleList(user.role)
                     },
                     accessToken: finalIdToken,
                     refreshToken: finalRefreshToken,
@@ -1210,7 +1234,8 @@ const getAllUsers = asyncHandler(async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     console.log("getAllUsers - page:", page, "limit:", limit);
     // 2. Definir el objeto de consulta (query) y opciones (options)
-    const query = {}; 
+    // Las cuentas internas (superadmin) no se listan nunca en la app.
+    const query = visibleUserFilter();
 
     const options = {
         page: page,

@@ -1,6 +1,7 @@
 import { User } from "./user.model.js";
 import { ROLES, STATUS } from "../../constants/roles.js";
 import { validateName } from "../../utils/regex.js";
+import { toClientRoleList } from "./user.policy.js";
 
 const FALLBACK_NAME = "Cliente";
 
@@ -60,7 +61,8 @@ export function toPublicUser(user) {
     email: user.email,
     fullName: user.fullName,
     phone: user.phone || '',
-    role: Array.isArray(user.role) ? user.role : [user.role],
+    // El rol interno nunca llega a la app: SUPERADMIN se presenta como ADMIN.
+    role: toClientRoleList(user.role),
     status: user.status,
   };
 }
