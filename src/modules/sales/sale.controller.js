@@ -9,6 +9,12 @@ import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
 import { applyStockMovement, createSaleRecord, STOCK_ERROR_CODES } from "./sale.service.js";
 import { cancelComboVouchersForSale, COMBO_VOUCHER_ERROR_CODES } from "../combos/comboPurchase.service.js";
+import { hasRole, normalizeRoles } from "../../utils/roles.js";
+import {
+    SALE_STAFF_ROLES,
+    canChangeSaleDate,
+    checkSaleModificationWindow
+} from "./sale.policy.js";
 
 const translations = {
     es: esTranslations,
@@ -21,6 +27,12 @@ const getLang = (req) => {
 
 const createSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+
+    // Solo el personal de tienda puede registrar ventas.
+    if (!hasRole(req, SALE_STAFF_ROLES)) {
+        return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
+    }
+
     const { saleNumber, customerName, customerPhone, customerId, items, subtotal, tax, discount, totalAmount, paymentMethod, paymentStatus, saleStatus, saleDate, transactionCategory, notes } = req.body;
 
     if (totalAmount === undefined) {
@@ -209,6 +221,11 @@ const updateSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const { saleId } = req.params;
 
+    // Solo el personal de tienda puede modificar ventas.
+    if (!hasRole(req, SALE_STAFF_ROLES)) {
+        return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
+    }
+
     if (!saleId || !mongoose.Types.ObjectId.isValid(saleId)) {
         return translateErrorResponse(res, lang, "error_sale_invalid_id", 400, translations);
     }
@@ -232,6 +249,32 @@ const updateSale = asyncHandler(async (req, res) => {
         notes === undefined
     ) {
         return translateErrorResponse(res, lang, "error_sale_no_fields_update", 400, translations);
+    }
+
+    // Autorización antes de validar y antes de escribir: la ventana se mide
+    // sobre la fecha original de la venta, nunca sobre la que envía el cliente.
+    let sale;
+    try {
+        sale = await Sale.findById(saleId);
+    } catch (error) {
+        console.error("Error updating sale:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+
+    if (!sale) {
+        return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
+    }
+
+    const roles = normalizeRoles(req.user?.role);
+    const windowCheck = checkSaleModificationWindow({ saleDate: sale.saleDate, roles });
+
+    if (!windowCheck.allowed) {
+        return translateErrorResponse(res, lang, windowCheck.errorCode, 403, translations);
+    }
+
+    // Cambiar la fecha altera reportes y caja: solo supervisor o admin.
+    if (saleDate !== undefined && !canChangeSaleDate(roles)) {
+        return translateErrorResponse(res, lang, "error_sale_date_change_forbidden", 403, translations);
     }
 
     const updateFields = {};
@@ -290,20 +333,6 @@ const updateSale = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
         }
 
-        // Rule: Only today's sales (considering Bolivia time UTC-4)
-        const getBoliviaDay = (d) => {
-            const date = new Date(d);
-            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-            return boliviaTime.toISOString().split('T')[0];
-        };
-
-        const txDate = getBoliviaDay(updatedSale.saleDate);
-        const today = getBoliviaDay(new Date());
-
-        if (txDate !== today) {
-            return translateErrorResponse(res, lang, "error_sale_immutable_date", 403, translations);
-        }
-
         return res.status(200).json(
             new ApiResponse(200, updatedSale, translations[lang]?.success_sale_updated || "success_sale_updated")
         );
@@ -316,6 +345,11 @@ const updateSale = asyncHandler(async (req, res) => {
 const deleteSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const { saleId } = req.params;
+
+    // Solo el personal de tienda puede eliminar ventas.
+    if (!hasRole(req, SALE_STAFF_ROLES)) {
+        return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
+    }
 
     if (!saleId || !mongoose.Types.ObjectId.isValid(saleId)) {
         return translateErrorResponse(res, lang, "error_sale_invalid_id", 400, translations);
@@ -333,20 +367,17 @@ const deleteSale = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
         }
 
-        // Rule: Only today's sales (considering Bolivia time UTC-4)
-        const getBoliviaDay = (d) => {
-            const date = new Date(d);
-            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-            return boliviaTime.toISOString().split('T')[0];
-        };
+        // Rule: solo el mismo día para el vendedor; hasta 7 días para
+        // supervisor y admin. Se mide sobre la fecha original de la venta.
+        const windowCheck = checkSaleModificationWindow({
+            saleDate: sale.saleDate,
+            roles: normalizeRoles(req.user?.role)
+        });
 
-        const txDate = getBoliviaDay(sale.saleDate);
-        const today = getBoliviaDay(new Date());
-
-        if (txDate !== today) {
+        if (!windowCheck.allowed) {
             await session.abortTransaction();
             session.endSession();
-            return translateErrorResponse(res, lang, "error_sale_immutable_date", 403, translations);
+            return translateErrorResponse(res, lang, windowCheck.errorCode, 403, translations);
         }
 
         // 1. REVERSIÓN DE STOCK (Si la venta no estaba ya cancelada)
@@ -460,6 +491,11 @@ const cancelSale = asyncHandler(async (req, res) => {
   const lang = getLang(req);
   const { saleId } = req.params;
 
+  // Solo el personal de tienda puede anular ventas.
+  if (!hasRole(req, SALE_STAFF_ROLES)) {
+    return translateErrorResponse(res, lang, "error_sale_forbidden_role", 403, translations);
+  }
+
   if (!saleId || !mongoose.Types.ObjectId.isValid(saleId)) {
     return translateErrorResponse(res, lang, "error_sale_invalid_id", 400, translations);
   }
@@ -476,20 +512,17 @@ const cancelSale = asyncHandler(async (req, res) => {
       return translateErrorResponse(res, lang, "error_sale_not_found", 404, translations);
     }
 
-    // Rule: Only today's sales (considering Bolivia time UTC-4)
-    const getBoliviaDay = (d) => {
-        const date = new Date(d);
-        const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-        return boliviaTime.toISOString().split('T')[0];
-    };
+    // Rule: solo el mismo día para el vendedor; hasta 7 días para
+    // supervisor y admin. Se mide sobre la fecha original de la venta.
+    const windowCheck = checkSaleModificationWindow({
+        saleDate: sale.saleDate,
+        roles: normalizeRoles(req.user?.role)
+    });
 
-    const txDate = getBoliviaDay(sale.saleDate);
-    const today = getBoliviaDay(new Date());
-
-    if (txDate !== today) {
+    if (!windowCheck.allowed) {
         await session.abortTransaction();
         session.endSession();
-        return translateErrorResponse(res, lang, "error_sale_immutable_date", 403, translations);
+        return translateErrorResponse(res, lang, windowCheck.errorCode, 403, translations);
     }
 
     if (sale.saleStatus === 2) {
