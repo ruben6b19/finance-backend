@@ -12,7 +12,6 @@ import {
     
     verifyIdToken,
     getAllUsers,
-    getUsersByInstitute,
     updateUser,
     deleteUser,
     changePassword
@@ -31,7 +30,6 @@ router.route("/login").post(loginUser)
 router.route("/verify-token").post(verifyIdToken)
 router.route("/change-password").post(verifyFirebaseToken, changePassword)
 
-router.route("/institute/:instituteId/all/:page").get(verifyFirebaseToken, getUsersByInstitute)
 //secured routes
 router.route("/logout").post(verifyFirebaseToken,  logoutUser)
 router.route("/refresh-token").post(refreshAccessToken2)

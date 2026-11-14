@@ -20,7 +20,6 @@ import {
     isAssignableRoleList,
     isHiddenUser,
     toClientRoleList,
-    visibleRoleFilter,
     visibleUserFilter
 } from "./user.policy.js";
 //import { initializeApp, cert } from "firebase-admin/app";
@@ -555,61 +554,6 @@ const deleteUser = asyncHandler( async (req, res) => {
         // En caso de fallo de Firebase, avisamos al cliente de la inconsistencia.
         console.error("Firebase Auth Error on Deletion:", firebaseError.message);
         throw new ApiError(500, `User deleted from MongoDB, but failed to delete from Firebase Auth. Firebase Error: ${firebaseError.message}`);
-    }
-});
-
-const getUsersByInstitute = asyncHandler(async (req, res) => {
-    console.log("getUsersByInstitute - req.params:", req.params);
-    const { instituteId, page } = req.params;
-    // 1. Extraemos 'search' (que viene del cliente) y 'role'
-    const { limit = 50, query, search, role } = req.query; 
-    const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
-
-    if (!instituteId) {
-        const errorCode = "error_invalid_institute_id";
-        return translateErrorResponse(res, lang, errorCode, 400, translations);
-    }
-    
-    const pageNumber = parseInt(page) || 1;
-    const limitNumber = parseInt(limit) || 50;
-
-    // 2. Construcción del Filtro Base. El filtro de rol excluye siempre las
-    // cuentas internas, incluso si el cliente pide explícitamente el rol -1.
-    const filter = { institute: instituteId, role: visibleRoleFilter(role) };
-
-    // 4. Incorporación del Query de Búsqueda
-    // Aceptamos tanto 'query' como 'search' para mayor compatibilidad
-    const term = search || query; 
-    console.log("Término de búsqueda recibido en getUsersByInstitute:", term);
-    if (term && term.trim() !== "") {
-        const searchRegex = { $regex: term.trim(), $options: 'i' };
-        
-        filter.$or = [
-            { fullName: searchRegex },
-            { email: searchRegex }
-        ];
-    }
-
-    console.log("Filter construido para getUsersByInstitute:", filter);
-    const options = {
-        page: pageNumber,
-        limit: limitNumber,
-        sort: { fullName: 1 }, 
-    };
-
-    try {
-        const results = await User.paginate(filter, options);
-    
-        return res.status(200).json(
-            new ApiResponse(
-                200, 
-                results, 
-                "success_users_fetched"
-            )
-        );
-    } catch (error) {
-         const errorCode = "error_internal_server_generic";
-         return translateErrorResponse(res, lang, errorCode, 500, translations);
     }
 });
 
@@ -1284,7 +1228,5 @@ export {
     updateUserCoverImage,
     getUserChannelProfile,
     getWatchHistory,
-    getAllUsers,
-
-    getUsersByInstitute
+    getAllUsers
 }

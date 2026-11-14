@@ -33,26 +33,6 @@ export const isHiddenUser = (user) =>
 export const visibleUserFilter = () => ({ role: { $ne: ROLES.SUPERADMIN } });
 
 /**
- * Filtro de rol para listados que además reciben un `role` por query string.
- * Si piden explícitamente el rol interno, devuelve un filtro imposible para
- * no revelar que existe.
- * @param {string|number|undefined|null} requestedRole
- * @returns {object}
- */
-export const visibleRoleFilter = (requestedRole) => {
-    if (requestedRole === undefined || requestedRole === null || requestedRole === "") {
-        return { $ne: ROLES.SUPERADMIN };
-    }
-
-    const parsed = Number(requestedRole);
-    if (!Number.isInteger(parsed) || parsed === ROLES.SUPERADMIN) {
-        return { $all: [ROLES.SUPERADMIN], $ne: ROLES.SUPERADMIN };
-    }
-
-    return { $all: [parsed], $ne: ROLES.SUPERADMIN };
-};
-
-/**
  * Solo los roles que la app puede asignar. El superadmin se crea por script,
  * nunca desde la API.
  * @param {number|string} role

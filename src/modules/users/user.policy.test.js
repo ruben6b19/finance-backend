@@ -2,7 +2,6 @@ import { ROLES } from "../../constants/roles.js";
 import {
     isHiddenUser,
     visibleUserFilter,
-    visibleRoleFilter,
     isAssignableRole,
     isAssignableRoleList,
     toClientRole,
@@ -19,14 +18,6 @@ describe("user visibility policy", () => {
 
     it("builds a filter that excludes internal accounts from listings", () => {
         expect(visibleUserFilter()).toEqual({ role: { $ne: ROLES.SUPERADMIN } });
-    });
-
-    it("never exposes the internal role through an explicit role filter", () => {
-        expect(visibleRoleFilter()).toEqual({ $ne: ROLES.SUPERADMIN });
-        expect(visibleRoleFilter("")).toEqual({ $ne: ROLES.SUPERADMIN });
-        expect(visibleRoleFilter("0")).toEqual({ $all: [ROLES.ADMIN], $ne: ROLES.SUPERADMIN });
-        expect(visibleRoleFilter("-1")).toEqual({ $all: [ROLES.SUPERADMIN], $ne: ROLES.SUPERADMIN });
-        expect(visibleRoleFilter("abc")).toEqual({ $all: [ROLES.SUPERADMIN], $ne: ROLES.SUPERADMIN });
     });
 
     it("only allows roles the app can assign", () => {
