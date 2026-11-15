@@ -1,6 +1,6 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { TransactionCategory } from "./transactionCategory.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -17,6 +17,7 @@ const getLang = (req) => {
 
 const createTransactionCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const TransactionCategory = getRequestModelResolver(req)("TransactionCategory");
     const { name, type, description, status, isSystem } = req.body;
 
     if (!name || !name.trim()) {
@@ -54,6 +55,7 @@ const createTransactionCategory = asyncHandler(async (req, res) => {
 
 const getTransactionCategories = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const TransactionCategory = getRequestModelResolver(req)("TransactionCategory");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, search, query, type, status, isSystem, sortBy = 'name', sortOrder = 'asc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
@@ -106,6 +108,7 @@ const getTransactionCategories = asyncHandler(async (req, res) => {
 
 const getTransactionCategoryById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const TransactionCategory = getRequestModelResolver(req)("TransactionCategory");
     const { categoryId } = req.params;
 
     if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
@@ -130,6 +133,7 @@ const getTransactionCategoryById = asyncHandler(async (req, res) => {
 
 const updateTransactionCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const TransactionCategory = getRequestModelResolver(req)("TransactionCategory");
     const { categoryId } = req.params;
 
     if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
@@ -193,6 +197,7 @@ const updateTransactionCategory = asyncHandler(async (req, res) => {
 
 const deleteTransactionCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const TransactionCategory = getRequestModelResolver(req)("TransactionCategory");
     const { categoryId } = req.params;
 
     if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {

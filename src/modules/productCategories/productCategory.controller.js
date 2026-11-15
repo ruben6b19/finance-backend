@@ -1,6 +1,6 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { ProductCategory } from "./productCategory.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -17,6 +17,7 @@ const getLang = (req) => {
 
 const createProductCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const ProductCategory = getRequestModelResolver(req)("ProductCategory");
     const { name, description, status, isSellable, isPurchasable } = req.body;
 
     if (!name || !name.trim()) {
@@ -47,6 +48,7 @@ const createProductCategory = asyncHandler(async (req, res) => {
 
 const getProductCategories = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const ProductCategory = getRequestModelResolver(req)("ProductCategory");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, search, query, status, isSellable, isPurchasable, sortBy = 'name', sortOrder = 'asc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
@@ -98,6 +100,7 @@ const getProductCategories = asyncHandler(async (req, res) => {
 
 const getProductCategoryById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const ProductCategory = getRequestModelResolver(req)("ProductCategory");
     const { categoryId } = req.params;
 
     if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
@@ -122,6 +125,7 @@ const getProductCategoryById = asyncHandler(async (req, res) => {
 
 const updateProductCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const ProductCategory = getRequestModelResolver(req)("ProductCategory");
     const { categoryId } = req.params;
 
     if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
@@ -167,6 +171,7 @@ const updateProductCategory = asyncHandler(async (req, res) => {
 
 const deleteProductCategory = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const ProductCategory = getRequestModelResolver(req)("ProductCategory");
     const { categoryId } = req.params;
 
     if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {

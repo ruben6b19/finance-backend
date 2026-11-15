@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Product } from "../products/product.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 
 // 0 = insumo / materia prima -> nunca público
 const PUBLIC_PRODUCT_TYPES = [1, 2, 3];
@@ -50,6 +50,7 @@ function escapeRegExp(value) {
 }
 
 const getPublicProducts = asyncHandler(async (req, res) => {
+    const Product = getRequestModelResolver(req)("Product");
     try {
         const search = typeof req.query.search === "string"
             ? req.query.search.trim()
@@ -99,6 +100,7 @@ const getPublicProducts = asyncHandler(async (req, res) => {
 });
 
 const getPublicProductById = asyncHandler(async (req, res) => {
+    const Product = getRequestModelResolver(req)("Product");
     try {
         const { productId } = req.params;
 
