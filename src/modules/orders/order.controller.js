@@ -4,14 +4,10 @@ import { ApiResponse } from "../../utils/ApiResponse.js";
 import { validateDescriptionAddress, validateName } from "../../utils/regex.js";
 import { ROLES } from "../../constants/roles.js";
 import { roleAtLeast } from "../../utils/roles.js";
-import { Product } from "../products/product.model.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
-import { User } from "../users/user.model.js";
-import { Order, ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
+import { ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord } from "../sales/sale.service.js";
-import { getCentralModel } from "../tenants/requestModel.js";
-import { ComboDefinition } from "../combos/comboDefinition.model.js";
-import { ComboComponent } from "../combos/comboComponent.model.js";
+import { getCentralModel, getRequestModelResolver } from "../tenants/requestModel.js";
 
 const COMBO_PRODUCT_TYPE = 3;
 const PUBLIC_PRODUCT_TYPES = [1, 2, COMBO_PRODUCT_TYPE];
@@ -63,6 +59,15 @@ const respondUserError = (res, result) => {
 };
 
 const createOrder = asyncHandler(async (req, res) => {
+  const getModel = getRequestModelResolver(req);
+  const Product = getModel("Product");
+  const Order = getModel("Order");
+  const ComboDefinition = getModel("ComboDefinition");
+  const ComboComponent = getModel("ComboComponent");
+  // Users are still central: identity is shared across stores, so the profile
+  // sync below must not be routed to the tenant database.
+  const User = getCentralModel("User");
+
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
@@ -283,6 +288,8 @@ const createOrder = asyncHandler(async (req, res) => {
 });
 
 const getMyOrders = asyncHandler(async (req, res) => {
+  const Order = getRequestModelResolver(req)("Order");
+
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
@@ -299,6 +306,8 @@ const getMyOrders = asyncHandler(async (req, res) => {
 });
 
 const getMyOrderById = asyncHandler(async (req, res) => {
+  const Order = getRequestModelResolver(req)("Order");
+
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
@@ -320,6 +329,8 @@ const getMyOrderById = asyncHandler(async (req, res) => {
 });
 
 const getAllOrders = asyncHandler(async (req, res) => {
+  const Order = getRequestModelResolver(req)("Order");
+
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
@@ -365,6 +376,8 @@ const COMBO_ERROR_I18N = {
 };
 
 const updateOrderStatus = asyncHandler(async (req, res) => {
+  const getModel = getRequestModelResolver(req);
+  const Order = getModel("Order");
   const { orderId } = req.params;
   const { status } = req.body || {};
 
@@ -448,9 +461,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       userId: resolved.user._id,
       session,
       transactionExtra: { orderId: order._id },
-      // Orders are not tenant-routed yet: keep the whole flow in the central
-      // database until this module is migrated.
-      getModel: getCentralModel
+      getModel
     });
 
     // El pedido guarda la venta que generó: sin este vínculo el ingreso queda
