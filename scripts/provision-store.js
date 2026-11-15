@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * Provisions the store settings and the first admin account.
+ * Provisions a store into its own database.
  *
- * It writes the single StoreConfig document (the row the mobile app reads from
- * GET /api/v1/store-config) and creates the first ADMIN user if none exists.
+ * Writes the single StoreConfig document (the row the mobile app reads from
+ * GET /api/v1/store-config) and the first ADMIN user into the store database,
+ * then registers the central email -> database mapping so every later request
+ * from that admin is routed to the right store.
  *
  * Authentication is owned by Firebase. The admin is created in Firebase Auth
  * and linked in MongoDB by firebaseUid; no password is stored in MongoDB.
@@ -14,12 +16,13 @@
  * existing non-admin Mongo user is only promoted with --force.
  *
  * Usage:
- *   node scripts/provision-store.js --name "Mi Tienda" --admin-email admin@example.com --admin-password secret123
- *   node scripts/provision-store.js --name "Mi Tienda" --admin-email admin@example.com --admin-password secret123 --dry-run
- *   node scripts/provision-store.js --name "Mi Tienda" --admin-email existing@example.com --admin-password secret123 --force
- *   STORE_NAME="Mi Tienda" STORE_ADMIN_EMAIL=admin@example.com STORE_ADMIN_PASSWORD=secret123 npm run provision:store
+ *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --admin-email admin@example.com --admin-password secret123
+ *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --admin-email admin@example.com --admin-password secret123 --dry-run
+ *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --admin-email existing@example.com --admin-password secret123 --force
+ *   TENANT_DB_NAME=tienda_norte STORE_NAME="Tienda Norte" STORE_ADMIN_EMAIL=admin@example.com STORE_ADMIN_PASSWORD=secret123 npm run provision:store
  *
  * Options:
+ *   --db-name <s>          Store database (or TENANT_DB_NAME, default financeDB)
  *   --name <s>             Store display name (or STORE_NAME, required)
  *   --razon-social <s>     Legal name (or STORE_RAZON_SOCIAL, default "")
  *   --nit <s>              Tax id (or STORE_NIT, default "")
@@ -44,10 +47,11 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
 import { DB_NAME } from "../src/constants.js";
-import { ROLES, STATUS } from "../src/constants/roles.js";
-import { StoreConfig, STORE_CONFIG_KEY } from "../src/modules/storeConfig/storeConfig.model.js";
-import { User } from "../src/modules/users/user.model.js";
-import { validateEmail, validateName } from "../src/utils/regex.js";
+import { TenantMapping } from "../src/modules/tenants/tenantMapping.model.js";
+// Importing the tenant connection registry also registers every model on the
+// default (central) connection, which is what centralGetModel resolves.
+import { getTenantModel } from "../src/modules/tenants/tenantConnection.js";
+import { provisionStore } from "../src/modules/tenants/provisioning.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -81,6 +85,12 @@ function readOption(args, key, envKey, fallback) {
     return fallback;
 }
 
+function assertDbName(dbName) {
+    if (/[/\\. "$*<>:|?]/.test(dbName)) {
+        throw new Error(`Nombre de base inválido: "${dbName}".`);
+    }
+}
+
 function initFirebase() {
     const rawBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
     if (!rawBase64) {
@@ -112,16 +122,40 @@ async function ensureFirebaseUser(auth, { email, password, fullName, resetPasswo
     }
 }
 
-function validateAdminInput({ adminEmail, adminPassword, adminName }) {
-    if (!validateEmail.test(adminEmail)) {
-        throw new Error("Falta un email válido para el administrador. Pasá --admin-email o definí STORE_ADMIN_EMAIL.");
+const STORE_ACTION = { create: "creada", update: "actualizada" };
+const ADMIN_ACTION = {
+    create: "creado en MongoDB y vinculado por firebaseUid",
+    promote: "usuario existente convertido y vinculado por firebaseUid",
+    skip: "omitido, ya existe un administrador",
+    "requires-force": "requiere --force para convertir el usuario existente"
+};
+const MAPPING_ACTION = {
+    created: "creado",
+    unchanged: "sin cambios",
+    skipped: "no aplica (base central)"
+};
+
+function printSummary(result) {
+    console.log(result.dryRun ? "\n[dry-run] plan:" : "\nResumen:");
+    console.log(`  base de datos: ${result.dbName}`);
+    console.log(
+        `  tienda:        ${STORE_ACTION[result.store.action] || result.store.action}` +
+        (result.store.id ? ` (${result.store.id})` : "")
+    );
+    console.log(
+        `  admin:         ${ADMIN_ACTION[result.admin.action] || result.admin.action}` +
+        (result.admin.email ? ` (${result.admin.email})` : "")
+    );
+    console.log(
+        `  mapeo:         ${MAPPING_ACTION[result.mapping.action] || result.mapping.action}` +
+        (result.mapping.action !== "skipped" && result.mapping.email
+            ? ` (${result.mapping.email} -> ${result.mapping.dbName})`
+            : "")
+    );
+    if (result.admin.firebaseUid) {
+        console.log(`  firebase uid:  ${result.admin.firebaseUid}`);
     }
-    if (adminPassword.length < 6) {
-        throw new Error("La contraseña del administrador debe tener al menos 6 caracteres. Pasá --admin-password o definí STORE_ADMIN_PASSWORD.");
-    }
-    if (!validateName.test(adminName)) {
-        throw new Error(`El nombre del administrador "${adminName}" no es válido. Usá solo letras y espacios (2 a 50 caracteres).`);
-    }
+    if (!result.dryRun) console.log("\nListo.");
 }
 
 async function main() {
@@ -130,6 +164,7 @@ async function main() {
     const resetPassword = args.has("reset-password");
     const force = args.has("force");
 
+    const dbName = String(readOption(args, "db-name", "TENANT_DB_NAME", DB_NAME));
     const name = String(readOption(args, "name", "STORE_NAME", ""));
     const razonSocial = String(readOption(args, "razon-social", "STORE_RAZON_SOCIAL", ""));
     const nit = String(readOption(args, "nit", "STORE_NIT", ""));
@@ -149,100 +184,62 @@ async function main() {
     if (!process.env.MONGODB_URI) {
         throw new Error("MONGODB_URI no está definida en el archivo .env");
     }
+    assertDbName(dbName);
 
     console.log("Aprovisionamiento de tienda:");
-    console.log(`  nombre:      ${name}`);
-    console.log(`  moneda:      ${currency}`);
-    if (dryRun) console.log("  modo:        dry-run, no se escribe nada");
+    console.log(`  base de datos: ${dbName}`);
+    console.log(`  nombre:        ${name}`);
+    console.log(`  moneda:        ${currency}`);
+    if (dryRun) console.log("  modo:          dry-run, no se escribe nada");
 
-    await mongoose.connect(`${process.env.MONGODB_URI}/${DB_NAME}`, {
+    // Always connect to the central database: TenantMapping lives there and the
+    // store models are reached through the tenant connection registry. The
+    // trailing slashes are trimmed so a URI ending in "/" does not produce a
+    // doubled separator (the driver would read the database as "/financeDB").
+    const mongoUri = process.env.MONGODB_URI.replace(/\/+$/, "");
+    await mongoose.connect(`${mongoUri}/${DB_NAME}`, {
         retryWrites: true,
         w: "majority"
     });
     console.log(`\nMongoDB conectado: ${mongoose.connection.host}`);
 
+    // Firebase is only initialized when a new admin actually has to be created,
+    // so dry-runs and admin-skipping re-runs never need service credentials.
+    let firebaseAuth = null;
+    const firebaseAdapter = async (payload) => {
+        if (!firebaseAuth) firebaseAuth = initFirebase();
+        return ensureFirebaseUser(firebaseAuth, payload);
+    };
+
     try {
-        const existingStore = await StoreConfig.findOne({ key: STORE_CONFIG_KEY }).lean();
-        const existingAdmin = await User.findOne({ role: ROLES.ADMIN });
-
-        let existingEmail = null;
-        if (!existingAdmin && adminEmail) {
-            existingEmail = await User.findOne({ email: adminEmail });
-        }
-
-        if (dryRun) {
-            console.log("\n[dry-run] plan:");
-            console.log(`  tienda: ${name} (${existingStore ? "actualizar" : "crear"})`);
-            if (existingAdmin) {
-                console.log(`  admin:  ya existe (${existingAdmin._id}), se omite`);
-            } else if (existingEmail) {
-                console.log(`  admin:  convertir en administrador (${existingEmail._id})${force ? "" : ", requiere --force"}`);
-            } else {
-                console.log("  admin:  crear en Firebase y vincular en MongoDB");
-            }
-            return;
-        }
-
-        // The store is always safe to upsert. Admin credentials are only needed
-        // when there is no admin yet, so store-only re-runs stay simple.
-        if (!existingAdmin) {
-            validateAdminInput({ adminEmail, adminPassword, adminName });
-
-            if (existingEmail && !force) {
-                throw new Error(
-                    `Ya existe un usuario con el email ${adminEmail} y no es administrador. ` +
-                    "Volvé a ejecutar con --force para convertirlo, o usá otro email con --admin-email."
-                );
-            }
-        }
-
-        const store = await StoreConfig.findOneAndUpdate(
-            { key: STORE_CONFIG_KEY },
-            { $set: { name, razonSocial, nit, phone, whatsapp, address, currency, ticketFooter, logoUrl } },
-            { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
-        );
-        console.log(`\nTienda: ${existingStore ? "actualizada" : "creada"} (${store._id})`);
-
-        let adminOutcome;
-        if (existingAdmin) {
-            adminOutcome = "omitido, ya existe un administrador";
-            console.log(`Admin: omitido, ya existe un administrador (${existingAdmin._id}).`);
-        } else {
-            const auth = initFirebase();
-            const firebase = await ensureFirebaseUser(auth, {
+        const result = await provisionStore({
+            dbName,
+            store: {
+                name,
+                razonSocial,
+                nit,
+                phone,
+                whatsapp,
+                address,
+                currency,
+                ticketFooter,
+                logoUrl
+            },
+            admin: {
                 email: adminEmail,
                 password: adminPassword,
                 fullName: adminName,
-                resetPassword
-            });
+                resetPassword,
+                force
+            },
+            getStoreModel: (modelName) => getTenantModel(dbName, modelName),
+            centralGetModel: (modelName) => mongoose.model(modelName),
+            TenantMapping,
+            ensureFirebaseUser: firebaseAdapter,
+            dryRun
+        });
 
-            console.log(`\nFirebase: ${firebase.created ? "usuario creado" : "usuario existente reutilizado"} (${firebase.uid})`);
-            if (firebase.passwordUpdated) console.log("Firebase: contraseña actualizada");
-
-            if (existingEmail) {
-                await User.updateOne(
-                    { _id: existingEmail._id },
-                    { $set: { role: [ROLES.ADMIN], firebaseUid: firebase.uid, status: STATUS.ACTIVE } }
-                );
-                adminOutcome = "convertido en administrador";
-                console.log(`Admin: usuario existente convertido y vinculado por firebaseUid (${existingEmail._id})`);
-            } else {
-                const admin = await User.create({
-                    email: adminEmail,
-                    fullName: adminName,
-                    firebaseUid: firebase.uid,
-                    role: [ROLES.ADMIN],
-                    status: STATUS.ACTIVE
-                });
-                adminOutcome = "creado";
-                console.log(`Admin: creado en MongoDB y vinculado por firebaseUid (${admin._id})`);
-            }
-        }
-
-        console.log("\nResumen:");
-        console.log(`  tienda: ${name}`);
-        console.log(`  admin:  ${adminOutcome}`);
-        console.log("\nListo.");
+        printSummary(result);
     } finally {
         await mongoose.disconnect();
     }

@@ -1,0 +1,241 @@
+import mongoose from "mongoose";
+import { MongoMemoryServer } from "mongodb-memory-server";
+
+import { DB_NAME } from "../../constants.js";
+import { ROLES, STATUS } from "../../constants/roles.js";
+import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
+import { TenantMapping } from "./tenantMapping.model.js";
+import { getTenantModel, resetTenantConnections } from "./tenantConnection.js";
+import { provisionStore } from "./provisioning.service.js";
+
+const TENANT_DB = "tenant_store";
+const OTHER_DB = "tenant_other";
+
+let mongoServer;
+
+const centralGetModel = (modelName) => mongoose.model(modelName);
+const getStoreModelFor = (dbName) => (modelName) => getTenantModel(dbName, modelName);
+
+const storePayload = { name: "Tienda Norte", currency: "Bs." };
+const adminPayload = {
+    email: "admin@tiendanorte.com",
+    password: "secret123",
+    fullName: "Admin Norte"
+};
+
+const buildFirebase = ({ uid = "fb-admin", created = true } = {}) => {
+    const calls = [];
+    const adapter = async (payload) => {
+        calls.push(payload);
+        return { uid, created, passwordUpdated: false };
+    };
+    adapter.calls = calls;
+    return adapter;
+};
+
+const provision = ({
+    dbName = TENANT_DB,
+    store = storePayload,
+    admin = adminPayload,
+    firebase,
+    dryRun = false
+} = {}) =>
+    provisionStore({
+        dbName,
+        store,
+        admin,
+        getStoreModel: getStoreModelFor(dbName),
+        centralGetModel,
+        TenantMapping,
+        ensureFirebaseUser: firebase,
+        dryRun
+    });
+
+beforeAll(async () => {
+    mongoServer = await MongoMemoryServer.create();
+    await mongoose.connect(mongoServer.getUri(), { dbName: DB_NAME });
+    await TenantMapping.init();
+}, 20000);
+
+afterAll(async () => {
+    resetTenantConnections();
+
+    const client = mongoose.connection.getClient();
+    await mongoose.connection.dropDatabase();
+    await client.db(TENANT_DB).dropDatabase();
+    await client.db(OTHER_DB).dropDatabase();
+
+    await mongoose.connection.close();
+    await mongoServer.stop();
+}, 120000);
+
+beforeEach(async () => {
+    await TenantMapping.deleteMany({});
+    await mongoose.model("User").deleteMany({});
+    await mongoose.model("StoreConfig").deleteMany({});
+
+    for (const dbName of [TENANT_DB, OTHER_DB]) {
+        await getTenantModel(dbName, "User").deleteMany({});
+        await getTenantModel(dbName, "StoreConfig").deleteMany({});
+    }
+});
+
+describe("provisionStore", () => {
+    it("writes the store, the admin and the central mapping into the store database", async () => {
+        const firebase = buildFirebase({ uid: "fb-admin-1" });
+
+        const result = await provision({ firebase });
+
+        expect(result.store.action).toBe("create");
+        expect(result.admin).toMatchObject({
+            action: "create",
+            email: adminPayload.email,
+            firebaseUid: "fb-admin-1"
+        });
+        expect(result.mapping).toMatchObject({
+            action: "created",
+            email: adminPayload.email,
+            dbName: TENANT_DB
+        });
+
+        const StoreConfig = getTenantModel(TENANT_DB, "StoreConfig");
+        const User = getTenantModel(TENANT_DB, "User");
+
+        const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY }).lean();
+        expect(config.name).toBe("Tienda Norte");
+
+        const admin = await User.findOne({ email: adminPayload.email }).lean();
+        expect(admin.role).toEqual([ROLES.ADMIN]);
+        expect(admin.firebaseUid).toBe("fb-admin-1");
+        expect(admin.status).toBe(STATUS.ACTIVE);
+
+        // The admin and the settings belong to the store, never to the central db.
+        expect(await mongoose.model("User").countDocuments()).toBe(0);
+        expect(await mongoose.model("StoreConfig").countDocuments()).toBe(0);
+
+        const mapping = await TenantMapping.findOne({ email: adminPayload.email }).lean();
+        expect(mapping.dbName).toBe(TENANT_DB);
+    });
+
+    it("is idempotent: a second run skips the admin and keeps a single mapping", async () => {
+        const firebase = buildFirebase();
+
+        await provision({ firebase });
+        const second = await provision({ firebase });
+
+        expect(second.store.action).toBe("update");
+        expect(second.admin.action).toBe("skip");
+        expect(second.mapping.action).toBe("unchanged");
+        expect(firebase.calls).toHaveLength(1);
+
+        expect(await getTenantModel(TENANT_DB, "StoreConfig").countDocuments()).toBe(1);
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(1);
+        expect(await TenantMapping.countDocuments()).toBe(1);
+    });
+
+    it("refuses to move an email already assigned to another store", async () => {
+        await TenantMapping.create({ email: adminPayload.email, dbName: OTHER_DB });
+        const firebase = buildFirebase();
+
+        await expect(provision({ firebase })).rejects.toThrow(/ya está asignado/);
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
+    });
+
+    it("refuses to provision the global superadmin into a store", async () => {
+        await mongoose.model("User").create({
+            email: adminPayload.email,
+            fullName: "Super Admin",
+            role: [ROLES.SUPERADMIN],
+            status: STATUS.ACTIVE
+        });
+        const firebase = buildFirebase();
+
+        await expect(provision({ firebase })).rejects.toThrow(/superadmin global/);
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
+    });
+
+    it("refuses to convert an internal superadmin account into a store admin", async () => {
+        await getTenantModel(TENANT_DB, "User").create({
+            email: adminPayload.email,
+            fullName: "Interno Tienda",
+            role: [ROLES.SUPERADMIN],
+            status: STATUS.ACTIVE
+        });
+        const firebase = buildFirebase();
+
+        await expect(provision({ firebase })).rejects.toThrow(/cuenta interna/);
+
+        expect(firebase.calls).toHaveLength(0);
+    });
+
+    it("requires --force to promote an existing non-admin user", async () => {
+        await getTenantModel(TENANT_DB, "User").create({
+            email: adminPayload.email,
+            fullName: "Vendedor Uno",
+            role: [ROLES.SELLER],
+            status: STATUS.ACTIVE
+        });
+        const firebase = buildFirebase({ uid: "fb-promoted" });
+
+        await expect(provision({ firebase })).rejects.toThrow(/--force/);
+        expect(firebase.calls).toHaveLength(0);
+
+        const promoted = await provision({ firebase, admin: { ...adminPayload, force: true } });
+
+        expect(promoted.admin).toMatchObject({
+            action: "promote",
+            email: adminPayload.email,
+            firebaseUid: "fb-promoted"
+        });
+
+        const user = await getTenantModel(TENANT_DB, "User")
+            .findOne({ email: adminPayload.email })
+            .lean();
+        expect(user.role).toEqual([ROLES.ADMIN]);
+        expect(user.firebaseUid).toBe("fb-promoted");
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(1);
+    });
+
+    it("plans without writing when dryRun is set", async () => {
+        const firebase = buildFirebase();
+
+        const plan = await provision({ firebase, dryRun: true });
+
+        expect(plan.dryRun).toBe(true);
+        expect(plan.store.action).toBe("create");
+        expect(plan.admin.action).toBe("create");
+        expect(plan.mapping.action).toBe("created");
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await getTenantModel(TENANT_DB, "StoreConfig").countDocuments()).toBe(0);
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
+        expect(await TenantMapping.countDocuments()).toBe(0);
+    });
+
+    it("skips the mapping when provisioning the central database", async () => {
+        const firebase = buildFirebase({ uid: "fb-central" });
+
+        const result = await provision({ dbName: DB_NAME, firebase });
+
+        expect(result.mapping.action).toBe("skipped");
+        expect(result.mapping.email).toBeNull();
+        expect(await TenantMapping.countDocuments()).toBe(0);
+        expect(await mongoose.model("User").countDocuments({ email: adminPayload.email })).toBe(1);
+        expect(await mongoose.model("StoreConfig").countDocuments()).toBe(1);
+    });
+
+    it("rejects a short admin password before touching the store", async () => {
+        const firebase = buildFirebase();
+
+        await expect(
+            provision({ firebase, admin: { ...adminPayload, password: "123" } })
+        ).rejects.toThrow(/al menos 6/);
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await getTenantModel(TENANT_DB, "StoreConfig").countDocuments()).toBe(0);
+    });
+});
