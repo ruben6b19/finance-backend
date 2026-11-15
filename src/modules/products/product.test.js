@@ -93,6 +93,13 @@ describe("updateProduct integration test", () => {
     beforeAll(async () => {
         mongoServer = await MongoMemoryServer.create();
         await mongoose.connect(mongoServer.getUri());
+
+        // Los duplicados se detectan por el índice único (error 11000). Si el
+        // índice todavía se está construyendo en background, el update pasa y
+        // el test falla de forma intermitente. Esperarlo lo vuelve determinista.
+        await Promise.all(
+            mongoose.modelNames().map((name) => mongoose.model(name).init())
+        );
     });
 
     afterAll(async () => {
