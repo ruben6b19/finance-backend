@@ -1,7 +1,6 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Product } from "../products/product.model.js";
-import { StockAdjustment } from "./stockAdjustment.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
 import mongoose from "mongoose";
@@ -28,6 +27,9 @@ const REASONS = [0, 1, 2, 3, 4];
 
 const createStockAdjustment = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Product = getModel("Product");
+    const StockAdjustment = getModel("StockAdjustment");
     const { product, newStock, delta, reason, note } = req.body || {};
 
     // a. Corrección administrativa: mismo criterio que anular un canje.
@@ -140,6 +142,7 @@ const createStockAdjustment = asyncHandler(async (req, res) => {
 
 const getStockAdjustments = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const StockAdjustment = getRequestModelResolver(req)("StockAdjustment");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, product, reason } = req.query;
 
