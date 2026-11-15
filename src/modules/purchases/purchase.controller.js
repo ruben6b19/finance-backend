@@ -1,10 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Purchase } from "./purchase.model.js";
-import { Product } from "../products/product.model.js";
-import { Transaction } from "../transactions/transaction.model.js";
-import { TransactionCategory } from "../transactionCategories/transactionCategory.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -21,6 +18,11 @@ const getLang = (req) => {
 
 const createPurchase = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Purchase = getModel("Purchase");
+    const Product = getModel("Product");
+    const Transaction = getModel("Transaction");
+    const TransactionCategory = getModel("TransactionCategory");
     const { purchaseNumber, supplierName, supplierId, items, subtotal, tax, discount, totalAmount, paymentMethod, paymentStatus, purchaseStatus, purchaseDate, transactionCategory, notes } = req.body;
 
     if (totalAmount === undefined) {
@@ -133,6 +135,7 @@ const createPurchase = asyncHandler(async (req, res) => {
 const getPurchases = asyncHandler(async (req, res) => {
     console.log(`Fetching purchases`);
     const lang = getLang(req);
+    const Purchase = getRequestModelResolver(req)("Purchase");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, search, query, paymentMethod, paymentStatus, purchaseStatus, userId, startDate, endDate, sortBy = 'purchaseDate', sortOrder = 'desc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
@@ -199,6 +202,7 @@ const getPurchases = asyncHandler(async (req, res) => {
 
 const getPurchaseById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Purchase = getRequestModelResolver(req)("Purchase");
     const { purchaseId } = req.params;
 
     if (!purchaseId || !mongoose.Types.ObjectId.isValid(purchaseId)) {
@@ -223,6 +227,7 @@ const getPurchaseById = asyncHandler(async (req, res) => {
 
 const updatePurchase = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Purchase = getRequestModelResolver(req)("Purchase");
     const { purchaseId } = req.params;
 
     if (!purchaseId || !mongoose.Types.ObjectId.isValid(purchaseId)) {
@@ -331,6 +336,10 @@ const updatePurchase = asyncHandler(async (req, res) => {
 
 const deletePurchase = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Purchase = getModel("Purchase");
+    const Product = getModel("Product");
+    const Transaction = getModel("Transaction");
     const { purchaseId } = req.params;
 
     if (!purchaseId || !mongoose.Types.ObjectId.isValid(purchaseId)) {
@@ -407,6 +416,7 @@ const deletePurchase = asyncHandler(async (req, res) => {
 
 const getPurchaseSummary = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Purchase = getRequestModelResolver(req)("Purchase");
     const { startDate, endDate } = req.query;
 
     const matchStage = {};
