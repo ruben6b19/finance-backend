@@ -1,8 +1,6 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { ComboPurchase } from "./comboPurchase.model.js";
-import { ComboRedemption } from "./comboRedemption.model.js";
-import { Product } from "../products/product.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast, normalizeRoles } from "../../utils/roles.js";
 import { checkRedemptionVoidWindow } from "./redemption.policy.js";
@@ -32,13 +30,16 @@ const CODE_PATTERN = /^[A-F0-9]{8}$/i;
 
 /**
  * Busca un voucher por ObjectId o por su código operativo de 8 caracteres.
- * Debe usar la sesión del llamador cuando corre dentro de una transacción.
+ * Debe usar la sesión del llamador cuando corre dentro de una transacción, y
+ * el resolver del tenant para no leer de otra base.
  */
-const resolveVoucher = async (idOrCode, session = null) => {
+const resolveVoucher = async (idOrCode, session = null, getModel) => {
     if (idOrCode === undefined || idOrCode === null) return null;
 
     const value = String(idOrCode).trim();
     if (!value) return null;
+
+    const ComboPurchase = getModel("ComboPurchase");
 
     const query = mongoose.Types.ObjectId.isValid(value)
         ? ComboPurchase.findById(value)
@@ -72,6 +73,8 @@ const itemsAreEquivalent = (left, right) => {
 
 const getComboPurchases = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboPurchase = getModel("ComboPurchase");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, status, customerPhone, code, sale, comboProduct } = req.query;
 
@@ -131,6 +134,7 @@ const getComboPurchases = asyncHandler(async (req, res) => {
 
 const getComboPurchaseById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
     const { comboPurchaseId } = req.params;
 
     if (!comboPurchaseId || (!mongoose.Types.ObjectId.isValid(comboPurchaseId) && !CODE_PATTERN.test(comboPurchaseId))) {
@@ -138,7 +142,7 @@ const getComboPurchaseById = asyncHandler(async (req, res) => {
     }
 
     try {
-        const voucher = await resolveVoucher(comboPurchaseId);
+        const voucher = await resolveVoucher(comboPurchaseId, null, getModel);
 
         if (!voucher) {
             return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
@@ -163,14 +167,17 @@ const getComboPurchaseById = asyncHandler(async (req, res) => {
 
 const getComboPurchaseRedemptions = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
     const { comboPurchaseId } = req.params;
 
     try {
-        const voucher = await resolveVoucher(comboPurchaseId);
+        const voucher = await resolveVoucher(comboPurchaseId, null, getModel);
 
         if (!voucher) {
             return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
         }
+
+        const ComboRedemption = getModel("ComboRedemption");
 
         // Incluye los canjes anulados: son append-only y quedan como rastro.
         const redemptions = await ComboRedemption.find({ comboPurchase: voucher._id })
@@ -191,6 +198,10 @@ const getComboPurchaseRedemptions = asyncHandler(async (req, res) => {
 
 const createRedemption = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboPurchase = getModel("ComboPurchase");
+    const ComboRedemption = getModel("ComboRedemption");
+    const Product = getModel("Product");
     const { comboPurchaseId } = req.params;
     const { idempotencyKey, items, notes } = req.body || {};
 
@@ -200,7 +211,7 @@ const createRedemption = asyncHandler(async (req, res) => {
     }
 
     // a. El voucher debe existir.
-    const voucher = await resolveVoucher(comboPurchaseId);
+    const voucher = await resolveVoucher(comboPurchaseId, null, getModel);
     if (!voucher) {
         return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
     }
@@ -433,6 +444,10 @@ const isRetryableTransactionError = (error) =>
 
 const voidRedemption = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboPurchase = getModel("ComboPurchase");
+    const ComboRedemption = getModel("ComboRedemption");
+    const Product = getModel("Product");
     const { comboPurchaseId, redemptionId } = req.params;
     const { voidReason } = req.body || {};
 
@@ -457,7 +472,7 @@ const voidRedemption = asyncHandler(async (req, res) => {
         session.startTransaction();
 
         try {
-            const voucher = await resolveVoucher(comboPurchaseId, session);
+            const voucher = await resolveVoucher(comboPurchaseId, session, getModel);
             if (!voucher) {
                 await session.abortTransaction();
                 session.endSession();
@@ -597,6 +612,9 @@ const voidRedemption = asyncHandler(async (req, res) => {
 
 const getVoucherReconciliation = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboPurchase = getModel("ComboPurchase");
+    const ComboRedemption = getModel("ComboRedemption");
     const MAX_REPORTED = 200;
     const TOLERANCE = 1e-6;
 

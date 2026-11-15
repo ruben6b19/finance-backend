@@ -1,8 +1,6 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { ComboDefinition } from "./comboDefinition.model.js";
-import { ComboComponent } from "./comboComponent.model.js";
-import { Product } from "../products/product.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -28,10 +26,10 @@ const round2 = (value) => Math.round(value * 100) / 100;
 
 /**
  * Valida y normaliza los componentes de un combo, y calcula su precio de
- * referencia a partir del catálogo. No escribe nada.
+ * referencia a partir del catálogo del tenant. No escribe nada.
  * Devuelve { error: "<i18n key>" } o { components, referencePrice }.
  */
-const normalizeComponents = async (rawComponents) => {
+const normalizeComponents = async (rawComponents, getModel) => {
     if (!Array.isArray(rawComponents) || rawComponents.length === 0) {
         return { error: "error_combo_components_required" };
     }
@@ -74,6 +72,7 @@ const normalizeComponents = async (rawComponents) => {
     }
 
     const productIds = [...seenProducts];
+    const Product = getModel("Product");
     const products = await Product.find({ _id: { $in: productIds } });
     const productMap = new Map(products.map((product) => [String(product._id), product]));
 
@@ -95,10 +94,11 @@ const normalizeComponents = async (rawComponents) => {
     return { components: normalized, referencePrice: round2(referencePrice) };
 };
 
-const hydrateComponents = async (definitions) => {
+const hydrateComponents = async (definitions, getModel) => {
     if (!Array.isArray(definitions) || definitions.length === 0) return [];
 
     const ids = definitions.map((definition) => definition._id);
+    const ComboComponent = getModel("ComboComponent");
     const components = await ComboComponent.find({ combo: { $in: ids } })
         .sort({ createdAt: 1 })
         .lean();
@@ -118,6 +118,10 @@ const hydrateComponents = async (definitions) => {
 
 const createCombo = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Product = getModel("Product");
+    const ComboDefinition = getModel("ComboDefinition");
+    const ComboComponent = getModel("ComboComponent");
     const {
         product, validityDays, graceDays, allowSubstitution,
         terms, status, components
@@ -148,7 +152,7 @@ const createCombo = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_combo_invalid_status", 400, translations);
     }
 
-    const normalized = await normalizeComponents(components);
+    const normalized = await normalizeComponents(components, getModel);
     if (normalized.error) {
         return translateErrorResponse(res, lang, normalized.error, 400, translations);
     }
@@ -205,6 +209,8 @@ const createCombo = asyncHandler(async (req, res) => {
 
 const getCombos = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboDefinition = getModel("ComboDefinition");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, status, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
 
@@ -225,7 +231,7 @@ const getCombos = asyncHandler(async (req, res) => {
             populate: ['product', 'createdBy']
         });
 
-        const hydrated = await hydrateComponents(results.docs);
+        const hydrated = await hydrateComponents(results.docs, getModel);
 
         return res.status(200).json(
             new ApiResponse(
@@ -242,6 +248,8 @@ const getCombos = asyncHandler(async (req, res) => {
 
 const getComboById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboDefinition = getModel("ComboDefinition");
     const { comboId } = req.params;
 
     if (!comboId || !mongoose.Types.ObjectId.isValid(comboId)) {
@@ -255,7 +263,7 @@ const getComboById = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_combo_not_found", 404, translations);
         }
 
-        const hydrated = await hydrateComponents([definition]);
+        const hydrated = await hydrateComponents([definition], getModel);
 
         return res.status(200).json(
             new ApiResponse(200, hydrated[0], translations[lang]?.success_combo_fetched || "success_combo_fetched")
@@ -268,6 +276,9 @@ const getComboById = asyncHandler(async (req, res) => {
 
 const updateCombo = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const ComboDefinition = getModel("ComboDefinition");
+    const ComboComponent = getModel("ComboComponent");
     const { comboId } = req.params;
     const {
         validityDays, graceDays, allowSubstitution,
@@ -325,7 +336,7 @@ const updateCombo = asyncHandler(async (req, res) => {
 
     let normalized = null;
     if (components !== undefined) {
-        normalized = await normalizeComponents(components);
+        normalized = await normalizeComponents(components, getModel);
         if (normalized.error) {
             return translateErrorResponse(res, lang, normalized.error, 400, translations);
         }
@@ -361,7 +372,7 @@ const updateCombo = asyncHandler(async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        const hydrated = await hydrateComponents([definition]);
+        const hydrated = await hydrateComponents([definition], getModel);
 
         return res.status(200).json(
             new ApiResponse(200, hydrated[0], translations[lang]?.success_combo_updated || "success_combo_updated")

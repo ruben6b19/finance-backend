@@ -7,6 +7,8 @@ import { ComboDefinition } from "./comboDefinition.model.js";
 import { ComboComponent } from "./comboComponent.model.js";
 import { ComboPurchase } from "./comboPurchase.model.js";
 import { ComboRedemption } from "./comboRedemption.model.js";
+import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
+import { DB_NAME } from "../../constants.js";
 import {
     getComboPurchases,
     getComboPurchaseById,
@@ -40,19 +42,39 @@ const call = (handler, req) =>
         handler(req, res, reject);
     });
 
+const buildTenant = (dbName = DB_NAME) => ({
+    email: "test@example.com",
+    dbName,
+    getModel: (modelName) => getTenantModel(dbName, modelName)
+});
+
 const request = (overrides = {}) => ({
     params: {},
     query: {},
     body: {},
     headers: {},
     user: { mongoDbId: new mongoose.Types.ObjectId(), role: [0] },
+    tenant: buildTenant(),
     ...overrides
 });
 
 beforeAll(async () => {
     // Anular un canje abre una transacción de Mongo: hace falta un replica set.
-    server = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+    // El nodo único pierde el lock a los 5 ms por defecto bajo carga
+    // secuencial; es una limitación del harness, no del código.
+    server = await MongoMemoryReplSet.create({
+        replSet: {
+            count: 1,
+            args: ["--setParameter", "maxTransactionLockRequestTimeoutMillis=10000"]
+        }
+    });
     await mongoose.connect(server.getUri());
+
+    // Construir todos los índices antes de la primera transacción: un build en
+    // background cambia el catálogo y hace fallar la transacción en vuelo.
+    await Promise.all(
+        mongoose.modelNames().map((name) => mongoose.model(name).init())
+    );
 
     const water = await Product.create({
         name: WATER_NAME,
@@ -124,7 +146,12 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
+    const client = mongoose.connection.getClient();
+    resetTenantConnections();
+
     await mongoose.connection.dropDatabase();
+    await client.db("tenant_combos").dropDatabase();
+
     await mongoose.connection.close();
     await server.stop();
 }, 60000);
@@ -394,5 +421,140 @@ describe("void redemption window", () => {
 
         expect(statusCode).toBe(403);
         expect(payload.message).toBe("Solo el personal autorizado puede anular un canje.");
+    });
+});
+
+describe("combo tenant routing", () => {
+    const TENANT_DB = "tenant_combos";
+    const tenantModel = (name) => getTenantModel(TENANT_DB, name);
+
+    const tenantRequest = (overrides = {}) => request({
+        ...overrides,
+        tenant: buildTenant(TENANT_DB)
+    });
+
+    let tenantWaterId;
+
+    beforeAll(async () => {
+        // Crear las colecciones fuera de la transacción evita la carrera por el
+        // lock del catálogo en un replica set de un solo nodo.
+        await Promise.all([
+            tenantModel("Product").init(),
+            tenantModel("ComboDefinition").init(),
+            tenantModel("ComboComponent").init(),
+            tenantModel("ComboPurchase").init(),
+            tenantModel("ComboRedemption").init()
+        ]);
+    }, 60000);
+
+    beforeEach(async () => {
+        await tenantModel("ComboPurchase").deleteMany({});
+        await tenantModel("ComboRedemption").deleteMany({});
+        await tenantModel("Product").deleteMany({});
+        await tenantModel("ComboDefinition").deleteMany({});
+        await tenantModel("ComboComponent").deleteMany({});
+
+        const water = await tenantModel("Product").create({
+            name: "Tenant Water",
+            price: 5,
+            unit: new mongoose.Types.ObjectId(),
+            productType: 2,
+            isSellable: true,
+            stock: 25
+        });
+        tenantWaterId = water._id;
+    });
+
+    const seedTenantVoucher = async () => {
+        const combo = await tenantModel("Product").create({
+            name: "Tenant Combo",
+            price: 20,
+            unit: new mongoose.Types.ObjectId(),
+            productType: 3,
+            isSellable: true,
+            stock: 0
+        });
+
+        const definition = await tenantModel("ComboDefinition").create({
+            product: combo._id,
+            referencePrice: 25,
+            validityDays: 0,
+            status: 1
+        });
+
+        await tenantModel("ComboComponent").create({
+            combo: definition._id,
+            product: tenantWaterId,
+            quantity: 5,
+            label: "Tenant Water",
+            stockProduct: tenantWaterId,
+            conversionFactor: 1
+        });
+
+        return tenantModel("ComboPurchase").create({
+            code: "AB12CD34",
+            comboProduct: combo._id,
+            comboDefinition: definition._id,
+            sale: new mongoose.Types.ObjectId(),
+            customerName: "Cliente",
+            customerPhone: "12345678",
+            purchasedAt: new Date(),
+            expiresAt: null,
+            pricePaid: 20,
+            balances: [
+                {
+                    product: tenantWaterId,
+                    includedQty: 5,
+                    usedQty: 0,
+                    stockProduct: tenantWaterId,
+                    conversionFactor: 1
+                }
+            ],
+            totalUnits: 5,
+            usedUnits: 0,
+            status: 0
+        });
+    };
+
+    it("redeems a tenant voucher against the tenant stock", async () => {
+        const voucher = await seedTenantVoucher();
+
+        const centralRedemptionsBefore = await ComboRedemption.countDocuments();
+        const centralStockBefore = (await Product.findById(waterProductId)).stock;
+
+        const { statusCode } = await call(
+            createRedemption,
+            tenantRequest({
+                params: { comboPurchaseId: String(voucher._id) },
+                body: {
+                    idempotencyKey: "tenant-key",
+                    items: [{ product: String(tenantWaterId), quantity: 2 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await tenantModel("Product").findById(tenantWaterId)).stock).toBe(23);
+        expect(await tenantModel("ComboRedemption").countDocuments()).toBe(1);
+
+        // The whole flow stays in one database: nothing may leak here.
+        expect(await ComboRedemption.countDocuments()).toBe(centralRedemptionsBefore);
+        expect((await Product.findById(waterProductId)).stock).toBe(centralStockBefore);
+    });
+
+    it("does not expose a tenant voucher to another database", async () => {
+        const voucher = await seedTenantVoucher();
+
+        const tenantRead = await call(
+            getComboPurchaseById,
+            tenantRequest({ params: { comboPurchaseId: String(voucher._id) } })
+        );
+        expect(tenantRead.statusCode).toBe(200);
+
+        const centralRead = await call(
+            getComboPurchaseById,
+            request({ params: { comboPurchaseId: String(voucher._id) } })
+        );
+        expect(centralRead.statusCode).toBe(404);
     });
 });
