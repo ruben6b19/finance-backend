@@ -2,7 +2,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
-import { User } from "./user.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { resolveFirebaseUser, toPublicUser } from "./user.service.js";
 
 export const registerOrGetGoogleUser = asyncHandler(async (req, res) => {
@@ -11,6 +11,9 @@ export const registerOrGetGoogleUser = asyncHandler(async (req, res) => {
   if (!firebaseUid) {
     return res.status(401).json(new ApiResponse(401, {}, "error_token_missing_uid"));
   }
+
+  const getModel = getRequestModelResolver(req);
+  const User = getModel("User");
 
   // Las cuentas existentes siempre pueden resolver su sesión para no romper el
   // login con Google. Solo la creación de cuentas nuevas queda restringida.
@@ -24,6 +27,7 @@ export const registerOrGetGoogleUser = asyncHandler(async (req, res) => {
     firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
+    getModel,
   });
 
   if (result.error === "missing_email") {

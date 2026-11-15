@@ -95,7 +95,8 @@ describe("order tenant routing", () => {
             tenantModel("Product").init(),
             tenantModel("TransactionCategory").init(),
             tenantModel("ComboDefinition").init(),
-            tenantModel("ComboComponent").init()
+            tenantModel("ComboComponent").init(),
+            tenantModel("User").init()
         ]);
     }, 60000);
 
@@ -130,6 +131,7 @@ describe("order tenant routing", () => {
             tenantModel("TransactionCategory").deleteMany({}),
             tenantModel("ComboDefinition").deleteMany({}),
             tenantModel("ComboComponent").deleteMany({}),
+            tenantModel("User").deleteMany({}),
             // The central database is shared by every test in this file, so
             // clear it too: the leak assertions are only meaningful if it starts
             // empty.
@@ -157,15 +159,15 @@ describe("order tenant routing", () => {
             isSystem: true
         });
 
-        // Identity stays central: both users live in the central database.
-        await User.create({
+        // Identity is tenant-scoped: both users live with the order.
+        await tenantModel("User").create({
             email: "client@example.com",
             fullName: "Cliente Prueba",
             firebaseUid: "uid-client",
             role: CLIENT,
             status: 1
         });
-        await User.create({
+        await tenantModel("User").create({
             email: "staff@example.com",
             fullName: "Vendedor Prueba",
             firebaseUid: "uid-staff",
@@ -184,9 +186,11 @@ describe("order tenant routing", () => {
         expect(await tenantModel("Order").countDocuments()).toBe(1);
         expect(await Order.countDocuments()).toBe(0);
 
-        // The profile sync must stay central: identity is shared across stores.
-        const centralUser = await User.findOne({ firebaseUid: "uid-client" });
-        expect(centralUser.fullName).toBe("Cliente Nuevo");
+        // The profile sync stays in the tenant: the customer and the order share
+        // one database.
+        const tenantUser = await tenantModel("User").findOne({ firebaseUid: "uid-client" });
+        expect(tenantUser.fullName).toBe("Cliente Nuevo");
+        expect(await User.countDocuments()).toBe(0);
         expect(payload.data.total).toBe(20);
     });
 

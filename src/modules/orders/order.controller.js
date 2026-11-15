@@ -7,7 +7,7 @@ import { roleAtLeast } from "../../utils/roles.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord } from "../sales/sale.service.js";
-import { getCentralModel, getRequestModelResolver } from "../tenants/requestModel.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 
 const COMBO_PRODUCT_TYPE = 3;
 const PUBLIC_PRODUCT_TYPES = [1, 2, COMBO_PRODUCT_TYPE];
@@ -64,14 +64,15 @@ const createOrder = asyncHandler(async (req, res) => {
   const Order = getModel("Order");
   const ComboDefinition = getModel("ComboDefinition");
   const ComboComponent = getModel("ComboComponent");
-  // Users are still central: identity is shared across stores, so the profile
-  // sync below must not be routed to the tenant database.
-  const User = getCentralModel("User");
+  // The customer profile lives in the same tenant database as the order, so
+  // the reference never crosses databases.
+  const User = getModel("User");
 
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
+    getModel,
   });
   if (resolved.error) return respondUserError(res, resolved);
 
@@ -288,12 +289,14 @@ const createOrder = asyncHandler(async (req, res) => {
 });
 
 const getMyOrders = asyncHandler(async (req, res) => {
-  const Order = getRequestModelResolver(req)("Order");
+  const getModel = getRequestModelResolver(req);
+  const Order = getModel("Order");
 
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
+    getModel,
   });
   if (resolved.error) return respondUserError(res, resolved);
 
@@ -306,12 +309,14 @@ const getMyOrders = asyncHandler(async (req, res) => {
 });
 
 const getMyOrderById = asyncHandler(async (req, res) => {
-  const Order = getRequestModelResolver(req)("Order");
+  const getModel = getRequestModelResolver(req);
+  const Order = getModel("Order");
 
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
+    getModel,
   });
   if (resolved.error) return respondUserError(res, resolved);
 
@@ -329,12 +334,14 @@ const getMyOrderById = asyncHandler(async (req, res) => {
 });
 
 const getAllOrders = asyncHandler(async (req, res) => {
-  const Order = getRequestModelResolver(req)("Order");
+  const getModel = getRequestModelResolver(req);
+  const Order = getModel("Order");
 
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
+    getModel,
   });
   if (resolved.error) return respondUserError(res, resolved);
 
@@ -394,6 +401,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     firebaseUid: req.user?.firebaseUid,
     email: req.user?.email,
     name: req.user?.name,
+    getModel,
   });
   if (resolved.error) return respondUserError(res, resolved);
 

@@ -1,6 +1,8 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import {ApiError} from "../../utils/ApiError.js"
-import { User} from "./user.model.js"
+import { getRequestModelResolver } from "../tenants/requestModel.js";
+import { getTenantModel } from "../tenants/tenantConnection.js";
+import { resolveTenantDbName } from "../tenants/tenantMapping.service.js";
 import {uploadOnCloudinary} from "../../utils/cloudinary.js"
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import jwt from "jsonwebtoken"
@@ -48,7 +50,7 @@ if (getApps().length === 0) {
 }
 
 
-const generateAccessAndRefereshTokens = async(userId) =>{
+const generateAccessAndRefereshTokens = async(userId, User) =>{
     try {
         const user = await User.findById(userId)
         const accessToken = user.generateAccessToken()
@@ -68,6 +70,8 @@ const generateAccessAndRefereshTokens = async(userId) =>{
 //todo borrar esto luego de probar la creación de usuario 
 const registerUserFirebase = asyncHandler( async (req, res) => {
     const { fullName, email, password, role, institute } = req.body;
+    const User = getRequestModelResolver(req)("User");
+
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
     const createdBy = req.user?.mongoDbId;
     console.log("sdfdsf", req.body)
@@ -157,6 +161,8 @@ const registerUserFirebase = asyncHandler( async (req, res) => {
 
 const registerUser = asyncHandler(async (req, res) => {
     const { fullName, email, password, role } = req.body;
+    const User = getRequestModelResolver(req)("User");
+
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
 
     // Solo un administrador (o superadmin) puede crear cuentas desde la API.
@@ -259,6 +265,8 @@ import bcrypt from "bcrypt";
 
 const updateUser = asyncHandler(async (req, res) => {
     const { userId } = req.params;
+    const User = getRequestModelResolver(req)("User");
+
     const { fullName, email, password, role, status } = req.body;
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
     const updatedBy = req.user?.mongoDbId; // Usamos _id de la sesión actual
@@ -357,7 +365,9 @@ const updateUser = asyncHandler(async (req, res) => {
 
 //todo este método es solo para pruebas, luego borrar 
 const updateUserfirebase = asyncHandler( async (req, res) => {
-    const { userId } = req.params; 
+    const { userId } = req.params;
+    const User = getRequestModelResolver(req)("User");
+
     const { fullName, email, password, role, status } = req.body;
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
     const updatedBy = req.user?.mongoDbId;
@@ -493,7 +503,9 @@ const changePassword = asyncHandler(async (req, res) => {
 });
 
 const deleteUser = asyncHandler( async (req, res) => {
-    const { userId } = req.params; 
+    const { userId } = req.params;
+    const User = getRequestModelResolver(req)("User");
+
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
     const deletedBy = req.user?.mongoDbId;
 
@@ -578,6 +590,17 @@ const verifyIdToken = asyncHandler(async (req, res) => {
         const decodedToken = await getAuth().verifyIdToken(idToken);
         const firebaseUid = decodedToken.uid;
 
+        // This endpoint runs before the tenant middleware, so it resolves the
+        // database from the verified email itself.
+        let dbName;
+        try {
+            dbName = await resolveTenantDbName(decodedToken.email);
+        } catch (error) {
+            console.error("Tenant resolution failed:", error);
+            throw new ApiError(503, "No se pudo resolver la tienda del usuario.");
+        }
+        const User = getTenantModel(dbName, "User");
+
         const user = await User.findOne({ firebaseUid }).select('_id role email fullName');
         if (!user) throw new ApiError(404, "User not found");
 
@@ -641,12 +664,15 @@ const verifyIdToken = asyncHandler(async (req, res) => {
 
     } catch (error) {
         console.error("verifyIdToken Error:", error);
+        if (error instanceof ApiError && error.statusCode === 503) throw error;
         throw new ApiError(401, error?.message || "Auth failed");
     }
 });
 
 const verifyIdToken2 = asyncHandler(async (req, res) => {
     const idToken = req.body.idToken;
+    const User = getRequestModelResolver(req)("User");
+
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
 
     if (!idToken) {
@@ -745,7 +771,9 @@ const loginUser = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Email and password are required");
     }
 
-    // 2. Buscar al usuario por email
+    // 2. Resolver la base de la tienda y buscar al usuario por email
+    const dbName = await resolveTenantDbName(email);
+    const User = getTenantModel(dbName, "User");
     const user = await User.findOne({ email }).populate('institute', 'name language');
 
     if (!user) {
@@ -801,6 +829,8 @@ const loginUser = asyncHandler(async (req, res) => {
 //todo fijarse como funciona la cokie despues borrar
 const loginUser2 = asyncHandler(async (req, res) =>{
     // req body -> data
+    const User = getRequestModelResolver(req)("User");
+
     // username or email
     //find the user
     //password check
@@ -834,7 +864,7 @@ const loginUser2 = asyncHandler(async (req, res) =>{
     throw new ApiError(401, "Invalid user credentials")
     }
 
-   const {accessToken, refreshToken} = await generateAccessAndRefereshTokens(user._id)
+   const {accessToken, refreshToken} = await generateAccessAndRefereshTokens(user._id, User)
 
     const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
 
@@ -860,6 +890,8 @@ const loginUser2 = asyncHandler(async (req, res) =>{
 })
 
 const logoutUser = asyncHandler(async(req, res) => {
+    const User = getRequestModelResolver(req)("User");
+
     await User.findByIdAndUpdate(
         req.user._id,
         {
@@ -932,6 +964,7 @@ const refreshAccessToken2 = asyncHandler(async (req, res) => {
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
     const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken
+    const User = getRequestModelResolver(req)("User");
 
     console.log("incomingRefreshToken", incomingRefreshToken)
     if (!incomingRefreshToken) {
@@ -987,6 +1020,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
 const updateUserAvatar = asyncHandler(async(req, res) => {
     const avatarLocalPath = req.file?.path
+    const User = getRequestModelResolver(req)("User");
 
     if (!avatarLocalPath) {
         throw new ApiError(400, "Avatar file is missing")
@@ -1020,6 +1054,7 @@ const updateUserAvatar = asyncHandler(async(req, res) => {
 
 const updateUserCoverImage = asyncHandler(async(req, res) => {
     const coverImageLocalPath = req.file?.path
+    const User = getRequestModelResolver(req)("User");
 
     if (!coverImageLocalPath) {
         throw new ApiError(400, "Cover image file is missing")
@@ -1055,6 +1090,7 @@ const updateUserCoverImage = asyncHandler(async(req, res) => {
 
 const getUserChannelProfile = asyncHandler(async(req, res) => {
     const {username} = req.params
+    const User = getRequestModelResolver(req)("User");
 
     if (!username?.trim()) {
         throw new ApiError(400, "username is missing")
@@ -1126,6 +1162,8 @@ const getUserChannelProfile = asyncHandler(async(req, res) => {
 })
 
 const getWatchHistory = asyncHandler(async(req, res) => {
+    const User = getRequestModelResolver(req)("User");
+
     const user = await User.aggregate([
         {
             $match: {
@@ -1182,6 +1220,7 @@ const getWatchHistory = asyncHandler(async(req, res) => {
 
 const getAllUsers = asyncHandler(async (req, res) => {
     const lang = req.headers['Accept-Language']?.split(',')[0].substring(0, 2) || 'es';
+    const User = getRequestModelResolver(req)("User");
 
     // Listar todos los usuarios es una operación administrativa. El superadmin
     // también pasa por la jerarquía de roles.

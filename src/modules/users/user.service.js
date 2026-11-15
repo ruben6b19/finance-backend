@@ -1,4 +1,3 @@
-import { User } from "./user.model.js";
 import { ROLES, STATUS } from "../../constants/roles.js";
 import { validateName } from "../../utils/regex.js";
 import { toClientRoleList } from "./user.policy.js";
@@ -26,11 +25,20 @@ function nameFromEmail(email) {
 /**
  * Finds the Mongo user bound to a Firebase account, creating it on first login.
  * New users are always CLIENT, never the schema default SELLER.
+ *
+ * The User model is tenant-scoped: the caller passes the resolver bound to the
+ * request database so the profile lives in the same database as the rest of the
+ * user's data.
  */
-export async function resolveFirebaseUser({ firebaseUid, email, name }) {
+export async function resolveFirebaseUser({ firebaseUid, email, name, getModel }) {
   if (!firebaseUid) return { error: "missing_uid" };
   const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
   if (!normalizedEmail) return { error: "missing_email" };
+  if (typeof getModel !== "function") {
+    throw new Error("resolveFirebaseUser requires a tenant model resolver.");
+  }
+
+  const User = getModel("User");
 
   const existing = await User.findOne({ firebaseUid });
   if (existing) return { user: existing };
