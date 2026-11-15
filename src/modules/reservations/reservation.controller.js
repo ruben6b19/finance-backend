@@ -1,11 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Reservation } from "./reservation.model.js";
-import { Sale } from "../sales/sale.model.js";
-import { Product } from "../products/product.model.js";
-import { Transaction } from "../transactions/transaction.model.js";
 import { applyStockMovement, createSaleRecord } from "../sales/sale.service.js";
-import { getCentralModel } from "../tenants/requestModel.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
 import mongoose from "mongoose";
@@ -39,6 +35,9 @@ const round2 = (value) => Math.round(value * 100) / 100;
 
 const createReservation = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Product = getModel("Product");
+    const Reservation = getModel("Reservation");
     const {
         customerName, customerPhone, customerId, items,
         paymentMethod, paymentReference, pickupAt, expiresAt, notes
@@ -149,9 +148,7 @@ const createReservation = asyncHandler(async (req, res) => {
             userId: req.user?.mongoDbId || null,
             session,
             transactionExtra: { reservationId },
-            // Reservations are not tenant-routed yet: keep the whole flow in the
-            // central database until this module is migrated.
-            getModel: getCentralModel
+            getModel
         });
 
         const reservation = await Reservation.create([{
@@ -199,6 +196,7 @@ const createReservation = asyncHandler(async (req, res) => {
 
 const getReservations = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Reservation = getRequestModelResolver(req)("Reservation");
     const pageParam = req.params.page || req.query.page;
     const {
         limit = 10, search, query, status, customerPhone,
@@ -253,6 +251,7 @@ const getReservations = asyncHandler(async (req, res) => {
 
 const getReservationById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Reservation = getRequestModelResolver(req)("Reservation");
     const { reservationId } = req.params;
 
     if (!reservationId || !mongoose.Types.ObjectId.isValid(reservationId)) {
@@ -278,6 +277,7 @@ const getReservationById = asyncHandler(async (req, res) => {
 
 const fulfillReservation = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Reservation = getRequestModelResolver(req)("Reservation");
     const { reservationId } = req.params;
 
     if (!reservationId || !mongoose.Types.ObjectId.isValid(reservationId)) {
@@ -312,6 +312,10 @@ const fulfillReservation = asyncHandler(async (req, res) => {
 
 const voidReservation = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Reservation = getModel("Reservation");
+    const Sale = getModel("Sale");
+    const Transaction = getModel("Transaction");
     const { reservationId } = req.params;
     const { voidReason } = req.body || {};
 
@@ -347,7 +351,7 @@ const voidReservation = asyncHandler(async (req, res) => {
         // El candado de "solo ventas de hoy" no aplica acá: esta es la reversión
         // administrativa de una reserva, que por definición puede ser de otro día.
         if (sale && sale.saleStatus !== 2) {
-            await applyStockMovement(sale.items, session, 1, getCentralModel);
+            await applyStockMovement(sale.items, session, 1, getModel);
             sale.saleStatus = 2;
             sale.paymentStatus = 2;
             await sale.save({ session });
