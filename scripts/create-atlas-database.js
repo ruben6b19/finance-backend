@@ -69,6 +69,12 @@ const MODELS = [
     TenantMapping
 ];
 
+// TenantMapping lives in the central database only. A store database must not
+// carry a stray collection for it: the tenant registry never resolves it, so it
+// would just be dead weight.
+const modelsForDatabase = (dbName) =>
+    dbName === DB_NAME ? MODELS : MODELS.filter((Model) => Model !== TenantMapping);
+
 // MongoDB error code returned when a collection already exists.
 const NAMESPACE_EXISTS = 48;
 
@@ -154,9 +160,11 @@ async function main() {
     }
     validateDatabaseName(dbName);
 
+    const models = modelsForDatabase(dbName);
+
     console.log("Inicialización de la base de datos en MongoDB Atlas:");
     console.log(`  base:     ${dbName}`);
-    console.log(`  modelos:  ${MODELS.length}`);
+    console.log(`  modelos:  ${models.length}`);
     if (dryRun) console.log("  modo:     dry-run, no se escribe nada");
 
     // Mongoose creates collections and indexes automatically on connect when
@@ -184,7 +192,7 @@ async function main() {
         console.log(`Colecciones actuales: ${existingNames.size}`);
 
         const results = [];
-        for (const Model of MODELS) {
+        for (const Model of models) {
             results.push(await ensureCollection(Model, existingNames, dryRun));
         }
 
