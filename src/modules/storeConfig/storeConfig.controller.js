@@ -1,6 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { StoreConfig, STORE_CONFIG_KEY } from "./storeConfig.model.js";
+import { STORE_CONFIG_KEY } from "./storeConfig.model.js";
+import { getRequestModel } from "../tenants/requestModel.js";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
@@ -16,6 +17,9 @@ const getLang = (req) => {
 
 const getStoreConfig = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    // Every store keeps its own settings, so the document is read from the
+    // database of the authenticated user, never from the central one.
+    const StoreConfig = getRequestModel(req, "StoreConfig");
 
     try {
         const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })

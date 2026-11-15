@@ -1,6 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { runExpirySweep as executeExpirySweep } from "./expiry.service.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
 import esTranslations from './es.json' with { type: 'json' };
@@ -25,9 +26,10 @@ const runExpirySweep = asyncHandler(async (req, res) => {
     }
 
     const dryRun = req.body?.dryRun === true;
+    const getModel = getRequestModelResolver(req);
 
     try {
-        const result = await executeExpirySweep({ dryRun });
+        const result = await executeExpirySweep({ dryRun, getModel });
 
         return res.status(200).json(
             new ApiResponse(

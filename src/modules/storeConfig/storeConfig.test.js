@@ -1,9 +1,13 @@
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
+import { DB_NAME } from "../../constants.js";
 import { StoreConfig, STORE_CONFIG_KEY } from "./storeConfig.model.js";
 import { getStoreConfig } from "./storeConfig.controller.js";
+import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import esTranslations from "./es.json" with { type: "json" };
+
+const TENANT_DB = "tenant_store_config";
 
 // asyncHandler does not return the handler promise, so tests must wait for the
 // response (or reject) signal instead of awaiting the controller call itself.
@@ -23,23 +27,38 @@ const call = (handler, req) =>
         handler(req, res, reject);
     });
 
+// Mirrors the shape verifyFirebaseToken attaches to the request.
+const requestFor = (dbName) => ({
+    headers: {},
+    tenant: {
+        getModel: (modelName) => getTenantModel(dbName, modelName)
+    }
+});
+
 describe("storeConfig module", () => {
     let mongoServer;
 
     beforeAll(async () => {
         mongoServer = await MongoMemoryServer.create();
-        await mongoose.connect(mongoServer.getUri());
+        await mongoose.connect(mongoServer.getUri(), { dbName: DB_NAME });
         await StoreConfig.init();
+        await getTenantModel(TENANT_DB, "StoreConfig").init();
     }, 20000);
 
     afterAll(async () => {
+        resetTenantConnections();
+
+        const client = mongoose.connection.getClient();
         await mongoose.connection.dropDatabase();
+        await client.db(TENANT_DB).dropDatabase();
+
         await mongoose.connection.close();
         await mongoServer.stop();
     }, 120000);
 
     beforeEach(async () => {
         await StoreConfig.deleteMany({});
+        await getTenantModel(TENANT_DB, "StoreConfig").deleteMany({});
     });
 
     it("applies the default currency and ticket footer", async () => {
@@ -80,7 +99,7 @@ describe("storeConfig module", () => {
             logoUrl: "https://example.com/logo.png"
         });
 
-        const { statusCode, payload } = await call(getStoreConfig, { headers: {} });
+        const { statusCode, payload } = await call(getStoreConfig, requestFor(DB_NAME));
 
         expect(statusCode).toBe(200);
         expect(payload.success).toBe(true);
@@ -112,13 +131,32 @@ describe("storeConfig module", () => {
     });
 
     it("returns 404 with a translated error when the collection is empty", async () => {
-        const { statusCode, payload } = await call(getStoreConfig, { headers: {} });
+        const { statusCode, payload } = await call(getStoreConfig, requestFor(DB_NAME));
 
         expect(statusCode).toBe(404);
         expect(payload).toEqual({
             success: false,
             statusCode: 404,
             message: esTranslations.error_store_config_not_found
+        });
+    });
+
+    it("reads the store config of the request tenant, not the central one", async () => {
+        await StoreConfig.create({ name: "Tienda Central" });
+        await getTenantModel(TENANT_DB, "StoreConfig").create({ name: "Tienda del Tenant" });
+
+        const { statusCode, payload } = await call(getStoreConfig, requestFor(TENANT_DB));
+
+        expect(statusCode).toBe(200);
+        expect(payload.data.name).toBe("Tienda del Tenant");
+
+        const central = await StoreConfig.findOne({ key: STORE_CONFIG_KEY }).lean();
+        expect(central.name).toBe("Tienda Central");
+    });
+
+    it("fails loudly when the request has no tenant context", async () => {
+        await expect(call(getStoreConfig, { headers: {} })).rejects.toMatchObject({
+            statusCode: 500
         });
     });
 });

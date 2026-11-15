@@ -1,13 +1,21 @@
-import { Reservation } from "../reservations/reservation.model.js";
-import { ComboPurchase } from "../combos/comboPurchase.model.js";
-
 const DAY_MS = 86400000;
 
 const toDate = (value) => (value instanceof Date ? value : new Date(value));
 
+// The sweep is tenant-routed: every function receives the resolver of the
+// request (or of the database being swept) and never imports a model directly,
+// so a store can never expire another store's promises.
+const requireGetModel = (getModel) => {
+    if (typeof getModel !== "function") {
+        throw new Error("The expiry sweep requires a model resolver.");
+    }
+    return getModel;
+};
+
 // Vencimiento de reservas: solo las activas (0) pasan a expiradas (2).
 // No mueve stock ni dinero: el no-show no revierte nada.
-const expireReservations = async ({ now = new Date(), dryRun = false } = {}) => {
+const expireReservations = async ({ now = new Date(), dryRun = false, getModel } = {}) => {
+    const Reservation = requireGetModel(getModel)("Reservation");
     const at = toDate(now);
     const filter = { status: 0, expiresAt: { $lte: at } };
 
@@ -23,7 +31,8 @@ const expireReservations = async ({ now = new Date(), dryRun = false } = {}) => 
 // Vencimiento de vouchers: solo cierra activos (0) cuyo plazo con gracia ya
 // pasó por completo. La comparación es estricta: el canje sigue permitido
 // mientras now <= expiresAt + graceDays.
-const expireComboVouchers = async ({ now = new Date(), dryRun = false } = {}) => {
+const expireComboVouchers = async ({ now = new Date(), dryRun = false, getModel } = {}) => {
+    const ComboPurchase = requireGetModel(getModel)("ComboPurchase");
     const at = toDate(now);
     const candidates = await ComboPurchase.find({
         status: 0,
@@ -54,10 +63,11 @@ const expireComboVouchers = async ({ now = new Date(), dryRun = false } = {}) =>
     return { matched: result.matchedCount, modified: result.modifiedCount };
 };
 
-const runExpirySweep = async ({ now = new Date(), dryRun = false } = {}) => {
+const runExpirySweep = async ({ now = new Date(), dryRun = false, getModel } = {}) => {
+    requireGetModel(getModel);
     const ranAt = toDate(now);
-    const reservations = await expireReservations({ now: ranAt, dryRun });
-    const vouchers = await expireComboVouchers({ now: ranAt, dryRun });
+    const reservations = await expireReservations({ now: ranAt, dryRun, getModel });
+    const vouchers = await expireComboVouchers({ now: ranAt, dryRun, getModel });
     return { ranAt, reservations, vouchers };
 };
 

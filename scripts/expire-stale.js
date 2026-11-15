@@ -10,12 +10,19 @@
  * Vouchers expire only strictly past `expiresAt + graceDays`, matching the
  * redemption window.
  *
+ * Every store keeps its promises in its own database, so by default the sweep
+ * runs over the central database plus every database registered in the central
+ * TenantMapping. A failure in one database does not stop the others; the script
+ * exits non-zero if any database failed.
+ *
  * Usage:
  *   node scripts/expire-stale.js
  *   node scripts/expire-stale.js --dry-run
+ *   node scripts/expire-stale.js --db-name tienda_norte
  *
  * Options:
- *   --dry-run   Report what would expire without writing anything.
+ *   --db-name <s>   Sweep only this database (default: central + every mapped store)
+ *   --dry-run       Report what would expire without writing anything.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +30,8 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 
 import { DB_NAME } from "../src/constants.js";
+import { TenantMapping } from "../src/modules/tenants/tenantMapping.model.js";
+import { getTenantModel } from "../src/modules/tenants/tenantConnection.js";
 import { runExpirySweep } from "../src/modules/maintenance/expiry.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,9 +58,18 @@ function parseArgs(argv) {
     return parsed;
 }
 
+async function resolveTargets(requestedDbName) {
+    if (requestedDbName) return [requestedDbName];
+    const mapped = await TenantMapping.distinct("dbName");
+    return [...new Set([DB_NAME, ...mapped])];
+}
+
 async function main() {
     const args = parseArgs(process.argv);
     const dryRun = args.get("dry-run") === true || args.get("dry-run") === "true";
+    const requestedDbName = typeof args.get("db-name") === "string"
+        ? args.get("db-name").trim()
+        : "";
 
     if (!process.env.MONGODB_URI) {
         throw new Error("MONGODB_URI is not defined in .env");
@@ -61,16 +79,45 @@ async function main() {
     console.log(`\nConnecting to ${DB_NAME}...`);
 
     try {
-        await mongoose.connect(`${process.env.MONGODB_URI}/${DB_NAME}`, {
+        // Trailing slashes are trimmed so a URI ending in "/" does not produce a
+        // doubled separator that the driver would read as "/financeDB".
+        const mongoUri = process.env.MONGODB_URI.replace(/\/+$/, "");
+        await mongoose.connect(`${mongoUri}/${DB_NAME}`, {
             retryWrites: true,
             w: "majority"
         });
 
-        const { ranAt, reservations, vouchers } = await runExpirySweep({ dryRun });
+        const targets = await resolveTargets(requestedDbName);
+        const now = new Date();
+        const failures = [];
 
-        console.log(`\nExpiry sweep at ${ranAt.toISOString()}${dryRun ? " (dry-run)" : ""}`);
-        console.log(`  reservations: matched ${reservations.matched}, modified ${reservations.modified}`);
-        console.log(`  vouchers:     matched ${vouchers.matched}, modified ${vouchers.modified}`);
+        console.log(`Sweeping ${targets.length} database(s): ${targets.join(", ")}`);
+
+        for (const dbName of targets) {
+            const getModel = (modelName) => getTenantModel(dbName, modelName);
+
+            try {
+                const { ranAt, reservations, vouchers } = await runExpirySweep({
+                    now,
+                    dryRun,
+                    getModel
+                });
+
+                console.log(`\n[${dbName}] sweep at ${ranAt.toISOString()}${dryRun ? " (dry-run)" : ""}`);
+                console.log(`  reservations: matched ${reservations.matched}, modified ${reservations.modified}`);
+                console.log(`  vouchers:     matched ${vouchers.matched}, modified ${vouchers.modified}`);
+            } catch (error) {
+                failures.push({ dbName, message: error.message });
+                console.error(`\n[${dbName}] FAILED: ${error.message}`);
+            }
+        }
+
+        if (failures.length > 0) {
+            throw new Error(
+                `Sweep failed for ${failures.length} database(s): ${failures.map((failure) => failure.dbName).join(", ")}`
+            );
+        }
+
         console.log(dryRun ? "\n[dry-run] nothing was written." : "\nSweep complete.");
     } finally {
         await mongoose.disconnect().catch(() => {});
