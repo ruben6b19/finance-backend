@@ -1,7 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Transaction } from "./transaction.model.js";
+import { getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -18,6 +18,7 @@ const getLang = (req) => {
 
 const createTransaction = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Transaction = getRequestModelResolver(req)("Transaction");
     const { type, amount, paymentMethod, concept, category, date, saleId, purchaseId, notes } = req.body;
 
     // 1. Validation - Required fields
@@ -73,6 +74,7 @@ const createTransaction = asyncHandler(async (req, res) => {
 
 const getTransactions = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Transaction = getRequestModelResolver(req)("Transaction");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, search, query, type, category, userId, paymentMethod, startDate, endDate, sortBy = 'date', sortOrder = 'desc' } = req.query;
     console.log("getTransactions query params:", req.query);
@@ -143,6 +145,7 @@ const getTransactions = asyncHandler(async (req, res) => {
 
 const getTransactionById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Transaction = getRequestModelResolver(req)("Transaction");
     const { transactionId } = req.params;
 
     if (!transactionId || !mongoose.Types.ObjectId.isValid(transactionId)) {
@@ -167,6 +170,7 @@ const getTransactionById = asyncHandler(async (req, res) => {
 
 const updateTransaction = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Transaction = getRequestModelResolver(req)("Transaction");
     const { transactionId } = req.params;
 
     if (!transactionId || !mongoose.Types.ObjectId.isValid(transactionId)) {
@@ -266,6 +270,7 @@ const updateTransaction = asyncHandler(async (req, res) => {
 
 const deleteTransaction = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Transaction = getRequestModelResolver(req)("Transaction");
     const { transactionId } = req.params;
 
     if (!transactionId || !mongoose.Types.ObjectId.isValid(transactionId)) {
@@ -312,6 +317,7 @@ const deleteTransaction = asyncHandler(async (req, res) => {
 
 const getTransactionSummary = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Transaction = getRequestModelResolver(req)("Transaction");
     const { startDate, endDate, category, userId } = req.query;
 
     const matchStage = { status: 1 };
