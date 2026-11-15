@@ -5,8 +5,18 @@ import { Product } from "./product.model.js";
 import { ProductCategory } from "../productCategories/productCategory.model.js";
 import { Unit } from "../units/unit.model.js";
 import { User } from "../users/user.model.js";
-import { updateProduct } from "./product.controller.js";
+import { updateProduct, createProduct, getProductById, getProducts } from "./product.controller.js";
+import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
+import { DB_NAME } from "../../constants.js";
 import esTranslations from "./es.json" with { type: "json" };
+
+const buildTenant = (dbName = DB_NAME) => ({
+    email: "test@example.com",
+    dbName,
+    getModel: (modelName) => getTenantModel(dbName, modelName)
+});
+
+const TENANT_DB = "tenant_products";
 
 // Models are imported only to register their schemas so populate() can resolve
 // the "category", "unit" and "createdBy" refs.
@@ -26,7 +36,7 @@ const createResMock = (onResponse) => {
 };
 
 const callUpdate = async (productId, body) => {
-    const req = { params: { productId }, body, headers: {} };
+    const req = { params: { productId }, body, headers: {}, tenant: buildTenant() };
 
     let resolveResponse;
     const responseReceived = new Promise((resolve) => {
@@ -86,7 +96,12 @@ describe("updateProduct integration test", () => {
     });
 
     afterAll(async () => {
+        const client = mongoose.connection.getClient();
+        resetTenantConnections();
+
         await mongoose.connection.dropDatabase();
+        await client.db(TENANT_DB).dropDatabase();
+
         await mongoose.connection.close();
         await mongoServer.stop();
     });
@@ -431,5 +446,103 @@ describe("updateProduct integration test", () => {
         expect(result.payload.data.unit).not.toBeNull();
         expect(result.payload.data.unit.name).toBe("Kilogram");
         expect(result.payload.data.category).toBeNull();
+    });
+
+    describe("tenant routing", () => {
+        const tenantProduct = () => getTenantModel(TENANT_DB, "Product");
+
+        const call = async (handler, req) => {
+            let resolveResponse;
+            const responseReceived = new Promise((resolve) => {
+                resolveResponse = resolve;
+            });
+
+            const res = createResMock(resolveResponse);
+            const next = jest.fn(() => resolveResponse(undefined));
+
+            await handler(req, res, next);
+            await responseReceived;
+
+            return { res, next, payload: res.json.mock.calls[0]?.[0] };
+        };
+
+        const buildCreateRequest = (tenant) => ({
+            body: {
+                name: "Tenant Product",
+                price: 10,
+                unit: new mongoose.Types.ObjectId().toString()
+            },
+            headers: {},
+            ...(tenant ? { tenant } : {})
+        });
+
+        beforeEach(async () => {
+            await tenantProduct().deleteMany({});
+        });
+
+        it("creates the product in the tenant database, never in the central one", async () => {
+            const result = await call(createProduct, buildCreateRequest(buildTenant(TENANT_DB)));
+
+            expect(result.next).not.toHaveBeenCalled();
+            expect(result.res.status).toHaveBeenCalledWith(201);
+
+            expect(await tenantProduct().countDocuments()).toBe(1);
+            expect(await Product.countDocuments()).toBe(0);
+        });
+
+        it("reads a product from its tenant and returns 404 from another database", async () => {
+            const created = await call(createProduct, buildCreateRequest(buildTenant(TENANT_DB)));
+            const productId = created.payload.data._id.toString();
+
+            const tenantRead = await call(getProductById, {
+                params: { productId },
+                headers: {},
+                tenant: buildTenant(TENANT_DB)
+            });
+
+            expect(tenantRead.res.status).toHaveBeenCalledWith(200);
+            expect(tenantRead.payload.data._id.toString()).toBe(productId);
+
+            const centralRead = await call(getProductById, {
+                params: { productId },
+                headers: {},
+                tenant: buildTenant(DB_NAME)
+            });
+
+            expectTranslatedError(centralRead, 404, "error_product_not_found");
+        });
+
+        it("lists only the products of the caller's tenant", async () => {
+            await call(createProduct, buildCreateRequest(buildTenant(TENANT_DB)));
+
+            const tenantList = await call(getProducts, {
+                params: {},
+                query: {},
+                headers: {},
+                tenant: buildTenant(TENANT_DB)
+            });
+
+            expect(tenantList.res.status).toHaveBeenCalledWith(200);
+            expect(tenantList.payload.data.totalDocs).toBe(1);
+
+            const centralList = await call(getProducts, {
+                params: {},
+                query: {},
+                headers: {},
+                tenant: buildTenant(DB_NAME)
+            });
+
+            expect(centralList.res.status).toHaveBeenCalledWith(200);
+            expect(centralList.payload.data.totalDocs).toBe(0);
+        });
+
+        it("refuses to run without a tenant context instead of writing to the central database", async () => {
+            const result = await call(createProduct, buildCreateRequest(null));
+
+            expect(result.next).toHaveBeenCalledTimes(1);
+            expect(result.next.mock.calls[0][0].statusCode).toBe(500);
+            expect(result.res.json).not.toHaveBeenCalled();
+            expect(await Product.countDocuments()).toBe(0);
+        });
     });
 });

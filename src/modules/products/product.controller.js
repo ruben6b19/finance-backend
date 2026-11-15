@@ -1,7 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Product } from "./product.model.js";
+import { getRequestModel } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -18,6 +18,7 @@ const getLang = (req) => {
 
 const createProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Product = getRequestModel(req, "Product");
     const {
         name, description, price, costPrice, stock, category,
         sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl
@@ -86,6 +87,7 @@ const createProduct = asyncHandler(async (req, res) => {
 
 const getProducts = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Product = getRequestModel(req, "Product");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, search, query, category, status, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
@@ -135,6 +137,7 @@ const getProducts = asyncHandler(async (req, res) => {
 
 const getProductById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Product = getRequestModel(req, "Product");
     const { productId } = req.params;
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
@@ -159,6 +162,7 @@ const getProductById = asyncHandler(async (req, res) => {
 
 const updateProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Product = getRequestModel(req, "Product");
     const { productId } = req.params;
     const body = req.body || {};
 
@@ -345,6 +349,7 @@ const updateProduct = asyncHandler(async (req, res) => {
 
 const deleteProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Product = getRequestModel(req, "Product");
     const { productId } = req.params;
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
