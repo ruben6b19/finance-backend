@@ -9,6 +9,7 @@ import { resolveFirebaseUser } from "../users/user.service.js";
 import { User } from "../users/user.model.js";
 import { Order, ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord } from "../sales/sale.service.js";
+import { getCentralModel } from "../tenants/requestModel.js";
 import { ComboDefinition } from "../combos/comboDefinition.model.js";
 import { ComboComponent } from "../combos/comboComponent.model.js";
 
@@ -446,7 +447,10 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       },
       userId: resolved.user._id,
       session,
-      transactionExtra: { orderId: order._id }
+      transactionExtra: { orderId: order._id },
+      // Orders are not tenant-routed yet: keep the whole flow in the central
+      // database until this module is migrated.
+      getModel: getCentralModel
     });
 
     // El pedido guarda la venta que generó: sin este vínculo el ingreso queda

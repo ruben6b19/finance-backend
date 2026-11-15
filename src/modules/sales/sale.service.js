@@ -1,8 +1,4 @@
 import mongoose from "mongoose";
-import { Sale } from "./sale.model.js";
-import { Product } from "../products/product.model.js";
-import { Transaction } from "../transactions/transaction.model.js";
-import { TransactionCategory } from "../transactionCategories/transactionCategory.model.js";
 import { issueComboVouchers } from "../combos/comboPurchase.service.js";
 
 // Productos con inventario real: insumos (0) y reventa (2).
@@ -23,9 +19,17 @@ const stockAmount = (item) => {
  * direction -1 => descuenta (venta). direction +1 => repone (anulación).
  * Cuando el producto controla stock, el descuento es condicional para que
  * nunca quede en negativo, ni siquiera bajo concurrencia.
+ *
+ * @param {Array} items
+ * @param {mongoose.ClientSession} session
+ * @param {number} direction
+ * @param {Function} getModel  Resolver del tenant; todas las lecturas y
+ *        escrituras deben caer en la misma base que el resto del flujo.
  */
-export const applyStockMovement = async (items, session, direction) => {
+export const applyStockMovement = async (items, session, direction, getModel) => {
     if (!Array.isArray(items) || items.length === 0) return;
+
+    const Product = getModel("Product");
 
     for (const item of items) {
         const targetId = stockTargetId(item);
@@ -85,9 +89,10 @@ export const STOCK_ERROR_CODES = {
     INVALID_STOCK_AMOUNT: "error_sale_invalid_item_quantity"
 };
 
-const resolveCategoryId = async (categoryId, session) => {
+const resolveCategoryId = async (categoryId, session, getModel) => {
     if (categoryId) return categoryId;
 
+    const TransactionCategory = getModel("TransactionCategory");
     const defaultCategory = await TransactionCategory.findOne({
         name: 'Ventas POS',
         type: 0,
@@ -111,10 +116,11 @@ const resolveCategoryId = async (categoryId, session) => {
  * @param {mongoose.ClientSession} params.session  Sesión activa.
  * @param {object} [params.transactionExtra]  Campos extra para la Transaction
  *        (por ejemplo `reservationId`).
+ * @param {Function} params.getModel  Resolver del tenant.
  * @returns {Promise<object>} La venta creada; `comboVouchers` queda adjunto
  *          como propiedad no persistida.
  */
-export const createSaleRecord = async ({ payload, userId, session, transactionExtra = {} }) => {
+export const createSaleRecord = async ({ payload, userId, session, transactionExtra = {}, getModel }) => {
     const {
         saleNumber,
         customerName,
@@ -133,8 +139,11 @@ export const createSaleRecord = async ({ payload, userId, session, transactionEx
         notes
     } = payload;
 
-    const resolvedCategoryId = await resolveCategoryId(categoryId, session);
+    const resolvedCategoryId = await resolveCategoryId(categoryId, session, getModel);
     const effectiveDate = saleDate ? new Date(saleDate) : new Date();
+
+    const Sale = getModel("Sale");
+    const Transaction = getModel("Transaction");
 
     const sale = await Sale.create([{
         saleNumber: saleNumber ? saleNumber.trim() : undefined,
@@ -159,7 +168,7 @@ export const createSaleRecord = async ({ payload, userId, session, transactionEx
     // Respeta stockProduct/conversionFactor y nunca deja stock negativo
     // en productos que sí controlan inventario.
     if (items.length > 0) {
-        await applyStockMovement(items, session, -1);
+        await applyStockMovement(items, session, -1, getModel);
     }
 
     const transaction = await Transaction.create([{
@@ -192,7 +201,8 @@ export const createSaleRecord = async ({ payload, userId, session, transactionEx
         paymentStatus,
         saleStatus,
         userId,
-        session
+        session,
+        getModel
     });
     createdSale.comboVouchers = comboVouchers;
 

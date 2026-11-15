@@ -2,8 +2,13 @@ import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 import { Sale } from "./sale.model.js";
+import { Product } from "../products/product.model.js";
+import { Transaction } from "../transactions/transaction.model.js";
+import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
+import { DB_NAME } from "../../constants.js";
 import {
     createSale,
+    getSaleById,
     updateSale,
     deleteSale,
     cancelSale
@@ -53,12 +58,21 @@ const call = (handler, req) =>
         handler(req, res, reject);
     });
 
+const buildTenant = (dbName = DB_NAME) => ({
+    email: "test@example.com",
+    dbName,
+    getModel: (modelName) => getTenantModel(dbName, modelName)
+});
+
+const TENANT_DB = "tenant_sales";
+
 const request = (overrides = {}) => ({
     params: {},
     query: {},
     body: {},
     headers: { "accept-language": "es" },
     user: { mongoDbId: new mongoose.Types.ObjectId(), role: SELLER },
+    tenant: buildTenant(),
     ...overrides
 });
 
@@ -74,12 +88,32 @@ const createSaleDoc = (daysAgo) =>
     });
 
 beforeAll(async () => {
-    replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+    // Un replica set de memoria de un solo nodo pierde el lock de una
+    // transacción por defecto a los 5 ms bajo carga secuencial y la venta
+    // falla con LockTimeout. Es una limitación del harness, no del código:
+    // producción conserva el valor por defecto.
+    replSet = await MongoMemoryReplSet.create({
+        replSet: {
+            count: 1,
+            args: ["--setParameter", "maxTransactionLockRequestTimeoutMillis=10000"]
+        }
+    });
     await mongoose.connect(replSet.getUri());
+    // Build every index before the first transaction. A background index build
+    // changes the catalog and makes an in-flight transaction fail with
+    // "catalog changes"; awaiting them up front removes that race.
+    await Promise.all(
+        mongoose.modelNames().map((name) => mongoose.model(name).init())
+    );
 }, 120000);
 
 afterAll(async () => {
+    const client = mongoose.connection.getClient();
+    resetTenantConnections();
+
     await mongoose.connection.dropDatabase();
+    await client.db(TENANT_DB).dropDatabase();
+
     await mongoose.connection.close();
     await replSet.stop();
 }, 60000);
@@ -379,5 +413,100 @@ describe("sale modification window", () => {
 
         expect(statusCode).toBe(403);
         expect((await Sale.findById(sale._id)).saleStatus).toBe(0);
+    });
+});
+
+describe("sale tenant routing", () => {
+    const tenantModel = (name) => getTenantModel(TENANT_DB, name);
+
+    beforeAll(async () => {
+        // Creating a collection implicitly inside a transaction races for the
+        // lock in a single-node replica set. Create them up front.
+        await Promise.all([
+            tenantModel("Sale").init(),
+            tenantModel("Transaction").init(),
+            tenantModel("Product").init(),
+            tenantModel("ComboPurchase").init()
+        ]);
+    }, 60000);
+
+    const tenantRequest = (overrides = {}) => request({
+        ...overrides,
+        tenant: buildTenant(TENANT_DB)
+    });
+
+    const createTenantProduct = (overrides = {}) => tenantModel("Product").create({
+        name: "Tenant Soda",
+        productType: 2,
+        isSellable: true,
+        isPurchasable: true,
+        price: 10,
+        unit: new mongoose.Types.ObjectId(),
+        stock: 10,
+        ...overrides
+    });
+
+    const sellTwoUnits = (product) => tenantRequest({
+        body: {
+            totalAmount: 20,
+            transactionCategory: new mongoose.Types.ObjectId().toString(),
+            items: [{ product: product._id.toString(), quantity: 2, unitPrice: 10, subtotal: 20 }],
+            paymentStatus: 1
+        }
+    });
+
+    beforeEach(async () => {
+        await tenantModel("Sale").deleteMany({});
+        await tenantModel("Transaction").deleteMany({});
+        await tenantModel("Product").deleteMany({});
+        await tenantModel("ComboPurchase").deleteMany({});
+
+        // The central database is shared with the tests above, which only
+        // clean up sales. Clear the rest so the leak assertions are meaningful.
+        await Transaction.deleteMany({});
+        await Product.deleteMany({});
+    });
+
+    itDb("writes the sale, its transaction and the stock movement to the tenant database", async () => {
+        const product = await createTenantProduct();
+
+        const { statusCode, payload } = await call(createSale, sellTwoUnits(product));
+
+        expect(statusCode).toBe(201);
+        expect(payload.data.transactionId).toBeDefined();
+
+        expect(await tenantModel("Sale").countDocuments()).toBe(1);
+        expect(await tenantModel("Transaction").countDocuments()).toBe(1);
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(8);
+
+        // The whole flow must stay in one database: nothing may leak here.
+        expect(await Sale.countDocuments()).toBe(0);
+        expect(await Transaction.countDocuments()).toBe(0);
+        expect(await Product.countDocuments()).toBe(0);
+    });
+
+    itDb("restores the tenant stock when the sale is cancelled", async () => {
+        const product = await createTenantProduct();
+        const created = await call(createSale, sellTwoUnits(product));
+        const saleId = created.payload.data._id.toString();
+
+        const cancelled = await call(cancelSale, tenantRequest({ params: { saleId } }));
+
+        expect(cancelled.statusCode).toBe(200);
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(10);
+        expect((await tenantModel("Sale").findById(saleId)).saleStatus).toBe(2);
+        expect(await Sale.countDocuments()).toBe(0);
+    });
+
+    itDb("does not expose a tenant sale to another database", async () => {
+        const product = await createTenantProduct();
+        const created = await call(createSale, sellTwoUnits(product));
+        const saleId = created.payload.data._id.toString();
+
+        const tenantRead = await call(getSaleById, tenantRequest({ params: { saleId } }));
+        expect(tenantRead.statusCode).toBe(200);
+
+        const centralRead = await call(getSaleById, request({ params: { saleId } }));
+        expect(centralRead.statusCode).toBe(404);
     });
 });

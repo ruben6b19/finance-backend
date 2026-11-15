@@ -1,8 +1,4 @@
 import mongoose from "mongoose";
-import { Product } from "../products/product.model.js";
-import { ComboDefinition } from "./comboDefinition.model.js";
-import { ComboComponent } from "./comboComponent.model.js";
-import { ComboPurchase } from "./comboPurchase.model.js";
 
 const COMBO_PRODUCT_TYPE = 3;
 
@@ -40,6 +36,7 @@ const parseUnitPrice = (value) => {
  * @param {number} params.saleStatus  Estado de la venta.
  * @param {string|mongoose.Types.ObjectId|null} [params.userId]
  * @param {mongoose.ClientSession} params.session  Sesión activa.
+ * @param {Function} params.getModel  Resolver del tenant.
  * @returns {Promise<Array>} Vouchers creados.
  */
 export const issueComboVouchers = async ({
@@ -52,9 +49,15 @@ export const issueComboVouchers = async ({
     paymentStatus,
     saleStatus,
     userId,
-    session
+    session,
+    getModel
 }) => {
     if (!Array.isArray(items) || items.length === 0) return [];
+
+    const Product = getModel("Product");
+    const ComboDefinition = getModel("ComboDefinition");
+    const ComboComponent = getModel("ComboComponent");
+    const ComboPurchase = getModel("ComboPurchase");
 
     const productIds = [];
     for (const item of items) {
@@ -176,13 +179,16 @@ export const issueComboVouchers = async ({
  * @param {string|mongoose.Types.ObjectId} params.saleId
  * @param {mongoose.ClientSession} params.session  Sesión activa.
  * @param {Date} [params.closedAt]
+ * @param {Function} params.getModel  Resolver del tenant.
  * @returns {Promise<number>} Cantidad de vouchers modificados.
  */
 export const cancelComboVouchersForSale = async ({
     saleId,
     session,
-    closedAt = new Date()
+    closedAt = new Date(),
+    getModel
 }) => {
+    const ComboPurchase = getModel("ComboPurchase");
     const vouchers = await ComboPurchase.find({ sale: saleId }).session(session);
 
     if (vouchers.some((voucher) => Number(voucher.usedUnits) > 0)) {

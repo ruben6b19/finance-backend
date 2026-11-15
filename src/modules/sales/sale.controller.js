@@ -1,8 +1,7 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { Sale } from "./sale.model.js";
-import { Transaction } from "../transactions/transaction.model.js";
+import { getRequestModel, getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -27,6 +26,7 @@ const getLang = (req) => {
 
 const createSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
 
     // Solo el personal de tienda puede registrar ventas.
     if (!hasRoleAtLeast(req, ROLES.SELLER)) {
@@ -91,7 +91,8 @@ const createSale = asyncHandler(async (req, res) => {
                 notes
             },
             userId: req.user?.mongoDbId || null,
-            session
+            session,
+            getModel
         });
 
         await session.commitTransaction();
@@ -129,6 +130,7 @@ const createSale = asyncHandler(async (req, res) => {
 const getSales = asyncHandler(async (req, res) => {
     console.log(`Fetching sales`);
     const lang = getLang(req);
+    const Sale = getRequestModel(req, "Sale");
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, search, query, paymentMethod, paymentStatus, saleStatus, userId, startDate, endDate, sortBy = 'saleDate', sortOrder = 'desc' } = req.query;
     const pageNumber = parseInt(pageParam) || 1;
@@ -195,6 +197,7 @@ const getSales = asyncHandler(async (req, res) => {
 
 const getSaleById = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Sale = getRequestModel(req, "Sale");
     const { saleId } = req.params;
 
     if (!saleId || !mongoose.Types.ObjectId.isValid(saleId)) {
@@ -219,6 +222,7 @@ const getSaleById = asyncHandler(async (req, res) => {
 
 const updateSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Sale = getRequestModel(req, "Sale");
     const { saleId } = req.params;
 
     // Solo el personal de tienda puede modificar ventas.
@@ -344,6 +348,9 @@ const updateSale = asyncHandler(async (req, res) => {
 
 const deleteSale = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const getModel = getRequestModelResolver(req);
+    const Sale = getModel("Sale");
+    const Transaction = getModel("Transaction");
     const { saleId } = req.params;
 
     // Solo el personal de tienda puede eliminar ventas.
@@ -382,7 +389,7 @@ const deleteSale = asyncHandler(async (req, res) => {
 
         // 1. REVERSIÓN DE STOCK (Si la venta no estaba ya cancelada)
         if (sale.saleStatus !== 2) {
-            await applyStockMovement(sale.items, session, 1);
+            await applyStockMovement(sale.items, session, 1, getModel);
         }
 
         // 2. ANULACIÓN DE TRANSACCIÓN VINCULADA
@@ -396,7 +403,7 @@ const deleteSale = asyncHandler(async (req, res) => {
 
         // 3. ANULACIÓN DE VOUCHERS DE COMBO
         try {
-            await cancelComboVouchersForSale({ saleId, session });
+            await cancelComboVouchersForSale({ saleId, session, getModel });
         } catch (voucherError) {
             if (voucherError?.message === "COMBO_ALREADY_REDEEMED") {
                 await session.abortTransaction();
@@ -425,6 +432,7 @@ const deleteSale = asyncHandler(async (req, res) => {
 
 const getSaleSummary = asyncHandler(async (req, res) => {
     const lang = getLang(req);
+    const Sale = getRequestModel(req, "Sale");
     const { startDate, endDate } = req.query;
 
     const matchStage = {};
@@ -489,6 +497,9 @@ const getSaleSummary = asyncHandler(async (req, res) => {
 
 const cancelSale = asyncHandler(async (req, res) => {
   const lang = getLang(req);
+  const getModel = getRequestModelResolver(req);
+  const Sale = getModel("Sale");
+  const Transaction = getModel("Transaction");
   const { saleId } = req.params;
 
   // Solo el personal de tienda puede anular ventas.
@@ -534,7 +545,7 @@ const cancelSale = asyncHandler(async (req, res) => {
     // Anular la venta también cancela sus vouchers de combo, salvo que alguno
     // ya haya sido canjeado: en ese caso la operación completa se rechaza.
     try {
-      await cancelComboVouchersForSale({ saleId, session });
+      await cancelComboVouchersForSale({ saleId, session, getModel });
     } catch (voucherError) {
       if (voucherError?.message === "COMBO_ALREADY_REDEEMED") {
         await session.abortTransaction();
@@ -548,7 +559,7 @@ const cancelSale = asyncHandler(async (req, res) => {
     sale.paymentStatus = 2;
     await sale.save({ session });
 
-    await applyStockMovement(sale.items, session, 1);
+    await applyStockMovement(sale.items, session, 1, getModel);
 
     if (sale.transactionId) {
       await Transaction.findByIdAndUpdate(

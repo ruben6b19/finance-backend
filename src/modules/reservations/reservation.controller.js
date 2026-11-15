@@ -5,6 +5,7 @@ import { Sale } from "../sales/sale.model.js";
 import { Product } from "../products/product.model.js";
 import { Transaction } from "../transactions/transaction.model.js";
 import { applyStockMovement, createSaleRecord } from "../sales/sale.service.js";
+import { getCentralModel } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
 import mongoose from "mongoose";
@@ -147,7 +148,10 @@ const createReservation = asyncHandler(async (req, res) => {
             },
             userId: req.user?.mongoDbId || null,
             session,
-            transactionExtra: { reservationId }
+            transactionExtra: { reservationId },
+            // Reservations are not tenant-routed yet: keep the whole flow in the
+            // central database until this module is migrated.
+            getModel: getCentralModel
         });
 
         const reservation = await Reservation.create([{
@@ -343,7 +347,7 @@ const voidReservation = asyncHandler(async (req, res) => {
         // El candado de "solo ventas de hoy" no aplica acá: esta es la reversión
         // administrativa de una reserva, que por definición puede ser de otro día.
         if (sale && sale.saleStatus !== 2) {
-            await applyStockMovement(sale.items, session, 1);
+            await applyStockMovement(sale.items, session, 1, getCentralModel);
             sale.saleStatus = 2;
             sale.paymentStatus = 2;
             await sale.save({ session });
