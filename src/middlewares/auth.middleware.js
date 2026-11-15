@@ -5,6 +5,7 @@ import { User } from "../modules/users/user.model.js";
 //import admin from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
 import { resolveTenantDbName } from "../modules/tenants/tenantMapping.service.js";
+import { getTenantConnection, getTenantModel } from "../modules/tenants/tenantConnection.js";
 
 export const verifyJWT = asyncHandler(async(req, _, next) => {
     try {
@@ -110,7 +111,12 @@ export const verifyFirebaseToken = async (req, res, next) => {
         try {
             const dbName = await resolveTenantDbName(req.user.email);
             req.user.dbName = dbName;
-            req.tenant = { email: req.user.email, dbName };
+            req.tenant = {
+                email: req.user.email,
+                dbName,
+                getConnection: () => getTenantConnection(dbName),
+                getModel: (modelName) => getTenantModel(dbName, modelName)
+            };
         } catch (error) {
             console.error("Tenant resolution failed:", error);
             return next(new ApiError(503, "No se pudo resolver la tienda del usuario."));

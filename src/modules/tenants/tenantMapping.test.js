@@ -4,6 +4,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 
 import { TenantMapping } from "./tenantMapping.model.js";
 import { getTenantDbNameByEmail, resolveTenantDbName } from "./tenantMapping.service.js";
+import { resetTenantConnections } from "./tenantConnection.js";
 import { DB_NAME } from "../../constants.js";
 import { ApiError } from "../../utils/ApiError.js";
 
@@ -27,6 +28,7 @@ beforeAll(async () => {
 }, 20000);
 
 afterAll(async () => {
+    resetTenantConnections();
     await mongoose.connection.dropDatabase();
     await mongoose.connection.close();
     await mongoServer.stop();
@@ -129,7 +131,9 @@ describe("verifyFirebaseToken tenant resolution", () => {
 
         expect(next).toHaveBeenCalledWith();
         expect(req.user.dbName).toBe("tenant_admin");
-        expect(req.tenant).toEqual({ email: "admin@example.com", dbName: "tenant_admin" });
+        expect(req.tenant).toMatchObject({ email: "admin@example.com", dbName: "tenant_admin" });
+        expect(typeof req.tenant.getConnection).toBe("function");
+        expect(typeof req.tenant.getModel).toBe("function");
     });
 
     it("falls back to the central database for unmapped emails", async () => {
@@ -186,5 +190,22 @@ describe("verifyFirebaseToken tenant resolution", () => {
         const error = next.mock.calls[0][0];
         expect(error).toBeInstanceOf(ApiError);
         expect(error.statusCode).toBe(503);
+    });
+
+    it("exposes a tenant-bound model on the request", async () => {
+        await TenantMapping.create({ email: "admin@example.com", dbName: "tenant_admin" });
+        mockVerifyIdToken.mockResolvedValue({ uid: "uid-5", email: "admin@example.com" });
+
+        const req = buildRequest();
+        const next = jest.fn();
+
+        await verifyFirebaseToken(req, {}, next);
+
+        const TenantProductCategory = req.tenant.getModel("ProductCategory");
+        expect(TenantProductCategory.collection.conn.name).toBe("tenant_admin");
+
+        await TenantProductCategory.deleteMany({});
+        await TenantProductCategory.create({ name: "tenant-only" });
+        expect(await TenantProductCategory.countDocuments()).toBe(1);
     });
 });
