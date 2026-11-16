@@ -28,13 +28,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
 
 import { DB_NAME } from "../src/constants.js";
 import { ROLES, STATUS } from "../src/constants/roles.js";
 import { User } from "../src/modules/users/user.model.js";
 import { validateEmail, validateName } from "../src/utils/regex.js";
+import { initFirebase, ensureFirebaseUser } from "./lib/firebase.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -73,39 +72,6 @@ function readOption(args, key, envKey, fallback) {
 function hasRole(user, role) {
     const roles = Array.isArray(user?.role) ? user.role : [user?.role];
     return roles.map(Number).includes(role);
-}
-
-function initFirebase() {
-    const rawBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
-    if (!rawBase64) {
-        throw new Error("FIREBASE_SERVICE_ACCOUNT_BASE64 no está definida en el archivo .env");
-    }
-
-    const serviceAccount = JSON.parse(Buffer.from(rawBase64, "base64").toString("utf-8"));
-    if (getApps().length === 0) {
-        initializeApp({ credential: cert(serviceAccount) });
-    }
-    return getAuth();
-}
-
-async function ensureFirebaseUser(auth, { email, password, fullName, resetPassword, dryRun }) {
-    if (dryRun) return { uid: "(dry-run)", created: false, passwordUpdated: false };
-
-    try {
-        const existing = await auth.getUserByEmail(email);
-        let passwordUpdated = false;
-
-        if (resetPassword) {
-            await auth.updateUser(existing.uid, { password });
-            passwordUpdated = true;
-        }
-
-        return { uid: existing.uid, created: false, passwordUpdated };
-    } catch (error) {
-        if (error.code !== "auth/user-not-found") throw error;
-        const created = await auth.createUser({ email, password, displayName: fullName });
-        return { uid: created.uid, created: true, passwordUpdated: false };
-    }
 }
 
 async function main() {
@@ -162,8 +128,7 @@ async function main() {
             email,
             password,
             fullName,
-            resetPassword,
-            dryRun
+            resetPassword
         });
 
         console.log(`\nFirebase: ${firebase.created ? "usuario creado" : "usuario existente reutilizado"} (${firebase.uid})`);
