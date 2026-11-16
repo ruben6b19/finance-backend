@@ -16,6 +16,38 @@ const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
 };
 
+const isMissingFactor = (value) => value === undefined || value === null || value === "";
+
+/**
+ * Fills the conversionFactor of every purchase item that omitted it.
+ *
+ * A client that buys a box sends quantity 1 and, in the old flow, no factor:
+ * stock grew by 1 instead of 12, and deleting the purchase restored that same
+ * wrong 1. The product already knows the factor, so the server inherits it.
+ *
+ * An explicit factor always wins, including 1: the operator may be purchasing
+ * loose units of a product that is normally bought by the box.
+ */
+const resolvePurchaseItems = async (items, Product, session) => {
+    if (!Array.isArray(items) || items.length === 0) return items;
+
+    const resolved = [];
+    for (const item of items) {
+        if (!item || !isMissingFactor(item.conversionFactor) || !mongoose.Types.ObjectId.isValid(item.product)) {
+            resolved.push(item);
+            continue;
+        }
+
+        const product = await Product.findById(item.product).session(session).lean();
+        if (product && product.purchaseUnit) {
+            resolved.push({ ...item, conversionFactor: product.conversionFactor ?? 1 });
+        } else {
+            resolved.push(item);
+        }
+    }
+    return resolved;
+};
+
 const createPurchase = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const getModel = getRequestModelResolver(req);
@@ -69,11 +101,15 @@ const createPurchase = asyncHandler(async (req, res) => {
             }
         }
 
+        // The stored item and the stock loop must agree: inheriting the factor
+        // here is what makes deletePurchase restore exactly what was added.
+        const purchaseItems = await resolvePurchaseItems(items || [], Product, session);
+
         const purchaseResults = await Purchase.create([{
             purchaseNumber: purchaseNumber ? purchaseNumber.trim() : undefined,
             supplierName: supplierName ? supplierName.trim() : undefined,
             supplierId: supplierId || null,
-            items: items || [],
+            items: purchaseItems,
             subtotal: subtotal !== undefined ? Number(subtotal) : numericTotalAmount,
             tax: tax !== undefined ? Number(tax) : 0,
             discount: discount !== undefined ? Number(discount) : 0,
@@ -89,8 +125,8 @@ const createPurchase = asyncHandler(async (req, res) => {
         const purchase = purchaseResults[0];
 
         // ACTUALIZACIÓN DE STOCK AUTOMÁTICA
-        if (items && items.length > 0) {
-            for (const item of items) {
+        if (purchaseItems.length > 0) {
+            for (const item of purchaseItems) {
                 const { product, quantity, conversionFactor = 1 } = item;
                 const increaseAmount = Number(quantity) * Number(conversionFactor);
 

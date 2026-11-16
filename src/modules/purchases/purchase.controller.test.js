@@ -213,3 +213,137 @@ describe("purchase tenant routing", () => {
         expect(listing.payload.data.docs).toHaveLength(2);
     });
 });
+
+describe("purchase conversion factor inheritance", () => {
+    const tenantModel = (name) => getTenantModel(TENANT_DB, name);
+
+    const tenantRequest = (overrides = {}) => request({
+        ...overrides,
+        tenant: buildTenant(TENANT_DB)
+    });
+
+    const createProduct = (overrides = {}) => tenantModel("Product").create({
+        name: "Gaseosa",
+        productType: 2,
+        isPurchasable: true,
+        price: 5,
+        unit: new mongoose.Types.ObjectId(),
+        stock: 0,
+        ...overrides
+    });
+
+    // The item deliberately omits conversionFactor unless a test sends it.
+    const bodyFor = (product, itemOverrides = {}) => ({
+        totalAmount: 5,
+        items: [{
+            product: String(product._id),
+            quantity: 1,
+            unitPrice: 5,
+            unit: String(new mongoose.Types.ObjectId()),
+            subtotal: 5,
+            ...itemOverrides
+        }]
+    });
+
+    beforeAll(async () => {
+        // Idempotent: the collections are also created by the routing suite, but
+        // this suite must not depend on running second.
+        await Promise.all([
+            tenantModel("Purchase").init(),
+            tenantModel("Product").init(),
+            tenantModel("Transaction").init(),
+            tenantModel("TransactionCategory").init()
+        ]);
+    }, 60000);
+
+    beforeEach(async () => {
+        await Promise.all([
+            tenantModel("Purchase").deleteMany({}),
+            tenantModel("Product").deleteMany({}),
+            tenantModel("Transaction").deleteMany({}),
+            tenantModel("TransactionCategory").deleteMany({}),
+            Purchase.deleteMany({}),
+            Sale.deleteMany({}),
+            Transaction.deleteMany({}),
+            Product.deleteMany({}),
+            TransactionCategory.deleteMany({})
+        ]);
+
+        // createPurchase resolves this system category for the expense.
+        await tenantModel("TransactionCategory").create({
+            name: "Compra de Insumos",
+            type: 1,
+            isSystem: true
+        });
+    });
+
+    itDb("inherits the product factor when the item omits it", async () => {
+        const product = await createProduct({
+            purchaseUnit: new mongoose.Types.ObjectId(),
+            conversionFactor: 12
+        });
+
+        const { statusCode, payload } = await call(
+            createPurchase,
+            tenantRequest({ body: bodyFor(product) })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(12);
+        expect(Number(payload.data.items[0].conversionFactor)).toBe(12);
+    });
+
+    itDb("keeps an explicit factor of 1 sent by the client", async () => {
+        const product = await createProduct({
+            purchaseUnit: new mongoose.Types.ObjectId(),
+            conversionFactor: 12
+        });
+
+        const { statusCode } = await call(
+            createPurchase,
+            tenantRequest({ body: bodyFor(product, { conversionFactor: 1 }) })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(1);
+    });
+
+    itDb("falls back to the quantity when the product has no purchase unit", async () => {
+        const product = await createProduct({
+            purchaseUnit: null,
+            conversionFactor: 12
+        });
+
+        const { statusCode, payload } = await call(
+            createPurchase,
+            tenantRequest({ body: bodyFor(product, { quantity: 2, subtotal: 10 }) })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(2);
+        expect(Number(payload.data.items[0].conversionFactor)).toBe(1);
+    });
+
+    itDb("restores exactly the stock that the inherited factor added", async () => {
+        const product = await createProduct({
+            purchaseUnit: new mongoose.Types.ObjectId(),
+            conversionFactor: 12,
+            stock: 5
+        });
+
+        const created = await call(
+            createPurchase,
+            tenantRequest({ body: bodyFor(product, { quantity: 2, subtotal: 10 }) })
+        );
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(29);
+
+        const { statusCode } = await call(
+            deletePurchase,
+            tenantRequest({ params: { purchaseId: String(created.payload.data._id) } })
+        );
+
+        expect(statusCode).toBe(200);
+        expect((await tenantModel("Product").findById(product._id)).stock).toBe(5);
+        expect(await tenantModel("Purchase").countDocuments()).toBe(0);
+    });
+});
