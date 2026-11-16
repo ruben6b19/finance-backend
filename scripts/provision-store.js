@@ -7,23 +7,28 @@
  * then registers the central email -> database mapping so every later request
  * from that admin is routed to the right store.
  *
+ * It also registers the store in the central slug -> database registry, which
+ * is what public clients use to identify the store through the X-Store header.
+ *
  * Authentication is owned by Firebase. The admin is created in Firebase Auth
  * and linked in MongoDB by firebaseUid; no password is stored in MongoDB.
  *
  * Idempotent: re-running updates the same StoreConfig document and skips the
  * admin creation as soon as any ADMIN user already exists. An existing Firebase
  * user with the requested email is reused instead of duplicated, and an
- * existing non-admin Mongo user is only promoted with --force.
+ * existing non-admin Mongo user is only promoted with --force. A registered
+ * database keeps its slug: it is never renamed automatically.
  *
  * Usage:
  *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --admin-email admin@example.com --admin-password secret123
- *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --admin-email admin@example.com --admin-password secret123 --dry-run
+ *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --slug tienda-norte --admin-email admin@example.com --admin-password secret123 --dry-run
  *   node scripts/provision-store.js --db-name tienda_norte --name "Tienda Norte" --admin-email existing@example.com --admin-password secret123 --force
  *   TENANT_DB_NAME=tienda_norte STORE_NAME="Tienda Norte" STORE_ADMIN_EMAIL=admin@example.com STORE_ADMIN_PASSWORD=secret123 npm run provision:store
  *
  * Options:
  *   --db-name <s>          Store database (or TENANT_DB_NAME, default financeDB)
  *   --name <s>             Store display name (or STORE_NAME, required)
+ *   --slug <s>             Public store slug, a-z 0-9 and dashes (or STORE_SLUG, default slugify(name))
  *   --razon-social <s>     Legal name (or STORE_RAZON_SOCIAL, default "")
  *   --nit <s>              Tax id (or STORE_NIT, default "")
  *   --phone <s>            Phone (or STORE_PHONE, default "")
@@ -48,6 +53,8 @@ import { getAuth } from "firebase-admin/auth";
 
 import { DB_NAME } from "../src/constants.js";
 import { TenantMapping } from "../src/modules/tenants/tenantMapping.model.js";
+import { Store } from "../src/modules/tenants/store.model.js";
+import { slugify } from "../src/modules/tenants/store.service.js";
 // Importing the tenant connection registry also registers every model on the
 // default (central) connection, which is what centralGetModel resolves.
 import { getTenantModel } from "../src/modules/tenants/tenantConnection.js";
@@ -134,6 +141,11 @@ const MAPPING_ACTION = {
     unchanged: "sin cambios",
     skipped: "no aplica (base central)"
 };
+const REGISTRY_ACTION = {
+    created: "creado",
+    unchanged: "sin cambios",
+    skipped: "no aplica (base central)"
+};
 
 function printSummary(result) {
     console.log(result.dryRun ? "\n[dry-run] plan:" : "\nResumen:");
@@ -152,6 +164,10 @@ function printSummary(result) {
             ? ` (${result.mapping.email} -> ${result.mapping.dbName})`
             : "")
     );
+    console.log(
+        `  registro:      ${result.registry.slug} -> ${result.registry.dbName} ` +
+        `(${REGISTRY_ACTION[result.registry.action] || result.registry.action})`
+    );
     if (result.admin.firebaseUid) {
         console.log(`  firebase uid:  ${result.admin.firebaseUid}`);
     }
@@ -166,6 +182,7 @@ async function main() {
 
     const dbName = String(readOption(args, "db-name", "TENANT_DB_NAME", DB_NAME));
     const name = String(readOption(args, "name", "STORE_NAME", ""));
+    const slug = String(readOption(args, "slug", "STORE_SLUG", slugify(name)));
     const razonSocial = String(readOption(args, "razon-social", "STORE_RAZON_SOCIAL", ""));
     const nit = String(readOption(args, "nit", "STORE_NIT", ""));
     const phone = String(readOption(args, "phone", "STORE_PHONE", ""));
@@ -214,6 +231,7 @@ async function main() {
     try {
         const result = await provisionStore({
             dbName,
+            slug,
             store: {
                 name,
                 razonSocial,
@@ -235,6 +253,7 @@ async function main() {
             getStoreModel: (modelName) => getTenantModel(dbName, modelName),
             centralGetModel: (modelName) => mongoose.model(modelName),
             TenantMapping,
+            StoreModel: Store,
             ensureFirebaseUser: firebaseAdapter,
             dryRun
         });

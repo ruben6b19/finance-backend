@@ -45,6 +45,7 @@ import { ComboPurchase } from "../src/modules/combos/comboPurchase.model.js";
 import { ComboComponent } from "../src/modules/combos/comboComponent.model.js";
 import { ComboDefinition } from "../src/modules/combos/comboDefinition.model.js";
 import { TenantMapping } from "../src/modules/tenants/tenantMapping.model.js";
+import { Store } from "../src/modules/tenants/store.model.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -66,14 +67,20 @@ const MODELS = [
     ComboPurchase,
     ComboComponent,
     ComboDefinition,
-    TenantMapping
+    TenantMapping,
+    Store
 ];
 
-// TenantMapping lives in the central database only. A store database must not
-// carry a stray collection for it: the tenant registry never resolves it, so it
-// would just be dead weight.
+// TenantMapping and Store live in the central database only: together they are
+// the registry that routes a request to its store. A store database must not
+// carry a stray collection for them, so they are dropped from tenant databases
+// (18 central models / 16 tenant models).
+const CENTRAL_ONLY_MODELS = [TenantMapping, Store];
+
 const modelsForDatabase = (dbName) =>
-    dbName === DB_NAME ? MODELS : MODELS.filter((Model) => Model !== TenantMapping);
+    dbName === DB_NAME
+        ? MODELS
+        : MODELS.filter((Model) => !CENTRAL_ONLY_MODELS.includes(Model));
 
 // MongoDB error code returned when a collection already exists.
 const NAMESPACE_EXISTS = 48;

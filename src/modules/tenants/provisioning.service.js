@@ -3,25 +3,29 @@ import { ROLES, STATUS } from "../../constants/roles.js";
 import { normalizeRoles } from "../../utils/roles.js";
 import { validateEmail, validateName } from "../../utils/regex.js";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
+import { isValidSlug, slugify } from "./store.service.js";
 
 /**
  * Provisions a store: the singleton StoreConfig and its first admin in the
- * store database, plus the central email -> database mapping.
+ * store database, plus the central email -> database mapping and the central
+ * slug -> database registry.
  *
  * Models and the Firebase adapter are injected so the flow is testable and so
  * the caller decides which database each model belongs to.
  *
  * Returns a summary describing what was created, updated or skipped. Throws on
  * any inconsistency (a superadmin being moved into a store, an email already
- * assigned to another store, a missing admin password, ...).
+ * assigned to another store, a missing admin password, a slug conflict, ...).
  */
 export async function provisionStore({
     dbName,
+    slug,
     store,
     admin = {},
     getStoreModel,
     centralGetModel,
     TenantMapping,
+    StoreModel,
     ensureFirebaseUser,
     dryRun = false
 }) {
@@ -36,6 +40,9 @@ export async function provisionStore({
     }
     if (!TenantMapping) {
         throw new Error("provisionStore requires the TenantMapping model.");
+    }
+    if (!StoreModel) {
+        throw new Error("provisionStore requires the Store model.");
     }
     if (!dryRun && typeof ensureFirebaseUser !== "function") {
         throw new Error("provisionStore requires a Firebase adapter.");
@@ -105,6 +112,47 @@ export async function provisionStore({
         }
     }
 
+    // The central store registry maps the public slug (X-Store header) to the
+    // database. The central database is not a store, so it is skipped there.
+    // A registered database is never renamed automatically: changing its slug
+    // would silently break every client already pointing at the old one.
+    const resolvedSlug = slug ? String(slug).trim().toLowerCase() : slugify(store?.name ?? "");
+    let registryAction = "skipped";
+    if (dbName !== DB_NAME) {
+        if (!isValidSlug(resolvedSlug)) {
+            throw new Error(
+                `El slug "${resolvedSlug}" no es válido. Usá de 2 a 48 caracteres en minúsculas ` +
+                "(a-z, 0-9 y guiones)."
+            );
+        }
+
+        const byDbName = await StoreModel.findOne({ dbName }).lean();
+        const bySlug = await StoreModel.findOne({ slug: resolvedSlug }).lean();
+
+        if (byDbName && byDbName.slug !== resolvedSlug) {
+            throw new Error(
+                `La base "${dbName}" ya está registrada con el slug "${byDbName.slug}". ` +
+                "Un slug no se renombra automáticamente."
+            );
+        }
+        if (bySlug && bySlug.dbName !== dbName) {
+            throw new Error(
+                `El slug "${resolvedSlug}" ya pertenece a la base "${bySlug.dbName}".`
+            );
+        }
+
+        registryAction = byDbName ? "unchanged" : "created";
+    }
+
+    const registryPlan = {
+        action: registryAction,
+        slug: resolvedSlug,
+        dbName
+    };
+    if (dbName === DB_NAME) {
+        registryPlan.reason = "central database";
+    }
+
     const plan = {
         dbName,
         dryRun,
@@ -118,7 +166,8 @@ export async function provisionStore({
             action: mappingAction,
             email: dbName === DB_NAME ? null : (mappedEmail || null),
             dbName
-        }
+        },
+        registry: registryPlan
     };
 
     if (dryRun) return plan;
@@ -176,7 +225,7 @@ export async function provisionStore({
         }
     }
 
-    // 3. Central mapping last: it only becomes useful once the admin exists.
+    // 3. Central mapping: it only becomes useful once the admin exists.
     let mappingOutcome = { action: "skipped", email: null, dbName, reason: "central database" };
     if (dbName !== DB_NAME) {
         const email = adminOutcome.email;
@@ -188,12 +237,35 @@ export async function provisionStore({
         mappingOutcome = { action: mappingAction, email: mapping.email, dbName: mapping.dbName };
     }
 
+    // 4. Central store registry last: a client can only reach the store once the
+    // store itself and its mapping exist.
+    let registryOutcome = {
+        action: "skipped",
+        slug: resolvedSlug,
+        dbName,
+        reason: "central database"
+    };
+    if (dbName !== DB_NAME) {
+        const registry = await StoreModel.findOneAndUpdate(
+            { dbName },
+            { $set: { slug: resolvedSlug, name: store.name, status: STATUS.ACTIVE } },
+            { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+        );
+        registryOutcome = {
+            action: registryAction,
+            slug: registry.slug,
+            dbName: registry.dbName,
+            id: String(registry._id)
+        };
+    }
+
     return {
         dbName,
         dryRun: false,
         store: { action: existingStore ? "update" : "create", id: String(storeDoc._id) },
         admin: adminOutcome,
-        mapping: mappingOutcome
+        mapping: mappingOutcome,
+        registry: registryOutcome
     };
 }
 

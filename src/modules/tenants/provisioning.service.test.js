@@ -5,6 +5,7 @@ import { DB_NAME } from "../../constants.js";
 import { ROLES, STATUS } from "../../constants/roles.js";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
 import { TenantMapping } from "./tenantMapping.model.js";
+import { Store } from "./store.model.js";
 import { getTenantModel, resetTenantConnections } from "./tenantConnection.js";
 import { provisionStore } from "./provisioning.service.js";
 
@@ -35,6 +36,7 @@ const buildFirebase = ({ uid = "fb-admin", created = true } = {}) => {
 
 const provision = ({
     dbName = TENANT_DB,
+    slug,
     store = storePayload,
     admin = adminPayload,
     firebase,
@@ -42,11 +44,13 @@ const provision = ({
 } = {}) =>
     provisionStore({
         dbName,
+        slug,
         store,
         admin,
         getStoreModel: getStoreModelFor(dbName),
         centralGetModel,
         TenantMapping,
+        StoreModel: Store,
         ensureFirebaseUser: firebase,
         dryRun
     });
@@ -55,6 +59,7 @@ beforeAll(async () => {
     mongoServer = await MongoMemoryServer.create();
     await mongoose.connect(mongoServer.getUri(), { dbName: DB_NAME });
     await TenantMapping.init();
+    await Store.init();
 }, 20000);
 
 afterAll(async () => {
@@ -71,6 +76,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
     await TenantMapping.deleteMany({});
+    await Store.deleteMany({});
     await mongoose.model("User").deleteMany({});
     await mongoose.model("StoreConfig").deleteMany({});
 
@@ -97,6 +103,12 @@ describe("provisionStore", () => {
             email: adminPayload.email,
             dbName: TENANT_DB
         });
+        expect(result.registry).toMatchObject({
+            action: "created",
+            slug: "tienda-norte",
+            dbName: TENANT_DB
+        });
+        expect(result.registry.id).toBeDefined();
 
         const StoreConfig = getTenantModel(TENANT_DB, "StoreConfig");
         const User = getTenantModel(TENANT_DB, "User");
@@ -115,6 +127,24 @@ describe("provisionStore", () => {
 
         const mapping = await TenantMapping.findOne({ email: adminPayload.email }).lean();
         expect(mapping.dbName).toBe(TENANT_DB);
+
+        const registry = await Store.findOne({ dbName: TENANT_DB }).lean();
+        expect(registry).toMatchObject({
+            slug: "tienda-norte",
+            name: "Tienda Norte",
+            status: STATUS.ACTIVE
+        });
+    });
+
+    it("uses an explicit slug when one is provided", async () => {
+        const result = await provision({ firebase: buildFirebase(), slug: "  Digital-Core  " });
+
+        expect(result.registry).toMatchObject({
+            action: "created",
+            slug: "digital-core",
+            dbName: TENANT_DB
+        });
+        expect(await Store.countDocuments()).toBe(1);
     });
 
     it("is idempotent: a second run skips the admin and keeps a single mapping", async () => {
@@ -126,11 +156,44 @@ describe("provisionStore", () => {
         expect(second.store.action).toBe("update");
         expect(second.admin.action).toBe("skip");
         expect(second.mapping.action).toBe("unchanged");
+        expect(second.registry.action).toBe("unchanged");
         expect(firebase.calls).toHaveLength(1);
 
         expect(await getTenantModel(TENANT_DB, "StoreConfig").countDocuments()).toBe(1);
         expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(1);
         expect(await TenantMapping.countDocuments()).toBe(1);
+        expect(await Store.countDocuments()).toBe(1);
+    });
+
+    it("refuses a slug that already belongs to another database", async () => {
+        await Store.create({ slug: "tienda-norte", dbName: OTHER_DB, name: "Otra Tienda" });
+        const firebase = buildFirebase();
+
+        await expect(provision({ firebase })).rejects.toThrow(/ya pertenece a la base/);
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await Store.countDocuments()).toBe(1);
+        expect(await getTenantModel(TENANT_DB, "StoreConfig").countDocuments()).toBe(0);
+    });
+
+    it("refuses to rename a database already registered under another slug", async () => {
+        await Store.create({ slug: "otro-slug", dbName: TENANT_DB, name: "Tienda Norte" });
+        const firebase = buildFirebase();
+
+        await expect(provision({ firebase })).rejects.toThrow(/ya está registrada con el slug/);
+
+        expect(firebase.calls).toHaveLength(0);
+        const registry = await Store.findOne({ dbName: TENANT_DB }).lean();
+        expect(registry.slug).toBe("otro-slug");
+    });
+
+    it("rejects an empty or invalid slug before writing", async () => {
+        const firebase = buildFirebase();
+
+        await expect(provision({ firebase, store: { name: "!!!" } })).rejects.toThrow(/slug/);
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await Store.countDocuments()).toBe(0);
     });
 
     it("refuses to move an email already assigned to another store", async () => {
@@ -209,21 +272,33 @@ describe("provisionStore", () => {
         expect(plan.store.action).toBe("create");
         expect(plan.admin.action).toBe("create");
         expect(plan.mapping.action).toBe("created");
+        expect(plan.registry).toEqual({
+            action: "created",
+            slug: "tienda-norte",
+            dbName: TENANT_DB
+        });
 
         expect(firebase.calls).toHaveLength(0);
         expect(await getTenantModel(TENANT_DB, "StoreConfig").countDocuments()).toBe(0);
         expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
         expect(await TenantMapping.countDocuments()).toBe(0);
+        expect(await Store.countDocuments()).toBe(0);
     });
 
-    it("skips the mapping when provisioning the central database", async () => {
+    it("skips the mapping and the registry when provisioning the central database", async () => {
         const firebase = buildFirebase({ uid: "fb-central" });
 
         const result = await provision({ dbName: DB_NAME, firebase });
 
         expect(result.mapping.action).toBe("skipped");
         expect(result.mapping.email).toBeNull();
+        expect(result.registry).toMatchObject({
+            action: "skipped",
+            dbName: DB_NAME,
+            reason: "central database"
+        });
         expect(await TenantMapping.countDocuments()).toBe(0);
+        expect(await Store.countDocuments()).toBe(0);
         expect(await mongoose.model("User").countDocuments({ email: adminPayload.email })).toBe(1);
         expect(await mongoose.model("StoreConfig").countDocuments()).toBe(1);
     });
