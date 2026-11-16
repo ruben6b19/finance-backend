@@ -208,4 +208,69 @@ describe("verifyFirebaseToken tenant resolution", () => {
         await TenantProductCategory.create({ name: "tenant-only" });
         expect(await TenantProductCategory.countDocuments()).toBe(1);
     });
+
+    it("uses the X-Store header for an unmapped email and records the slug", async () => {
+        mockVerifyIdToken.mockResolvedValue({ uid: "uid-6", email: "cliente@example.com" });
+
+        const req = {
+            ...buildRequest(),
+            store: { slug: "tienda-norte", dbName: "tenant_header" }
+        };
+        const next = jest.fn();
+
+        await verifyFirebaseToken(req, {}, next);
+
+        expect(next).toHaveBeenCalledWith();
+        expect(req.user.dbName).toBe("tenant_header");
+        expect(req.tenant).toMatchObject({
+            email: "cliente@example.com",
+            dbName: "tenant_header",
+            storeSlug: "tienda-norte"
+        });
+    });
+
+    it("rejects a header that conflicts with the mapped store of the user", async () => {
+        await TenantMapping.create({ email: "admin@example.com", dbName: "tenant_admin" });
+        mockVerifyIdToken.mockResolvedValue({ uid: "uid-7", email: "admin@example.com" });
+
+        const req = {
+            ...buildRequest(),
+            store: { slug: "otra-tienda", dbName: "tenant_other" }
+        };
+        const next = jest.fn();
+
+        await verifyFirebaseToken(req, {}, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        const error = next.mock.calls[0][0];
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error.statusCode).toBe(403);
+        expect(error.message).toBe("El usuario pertenece a otra tienda.");
+    });
+
+    it("enriches the tenant already resolved by resolveStore instead of replacing it", async () => {
+        await TenantMapping.create({ email: "admin@example.com", dbName: "tenant_admin" });
+        mockVerifyIdToken.mockResolvedValue({ uid: "uid-8", email: "admin@example.com" });
+
+        const existingTenant = {
+            storeSlug: "tienda-admin",
+            dbName: "tenant_admin",
+            getModel: () => "sentinel"
+        };
+        const req = {
+            ...buildRequest(),
+            store: { slug: "tienda-admin", dbName: "tenant_admin" },
+            tenant: existingTenant
+        };
+        const next = jest.fn();
+
+        await verifyFirebaseToken(req, {}, next);
+
+        expect(next).toHaveBeenCalledWith();
+        expect(req.tenant.getModel()).toBe("sentinel");
+        expect(req.tenant).toMatchObject({
+            dbName: "tenant_admin",
+            storeSlug: "tienda-admin"
+        });
+    });
 });

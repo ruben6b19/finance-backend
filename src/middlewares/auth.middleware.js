@@ -4,8 +4,9 @@ import jwt from "jsonwebtoken"
 import { User } from "../modules/users/user.model.js";
 //import admin from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
-import { resolveTenantDbName } from "../modules/tenants/tenantMapping.service.js";
+import { getTenantDbNameByEmail } from "../modules/tenants/tenantMapping.service.js";
 import { getTenantConnection, getTenantModel } from "../modules/tenants/tenantConnection.js";
+import { DB_NAME } from "../constants.js";
 
 export const verifyJWT = asyncHandler(async(req, _, next) => {
     try {
@@ -106,17 +107,36 @@ export const verifyFirebaseToken = async (req, res, next) => {
             instituteLang: decodedToken.instituteLang
         };
 
-        // Resolve which tenant database owns this user. The mapping lives in
-        // the central database; unmapped emails fall back to the central one.
+        // Resolve which tenant database owns this request. Precedence:
+        // - a mapped staff email wins over a conflicting header, so a user can
+        //   never be silently routed into another store (403 instead);
+        // - an anonymous/customer request is identified by the X-Store header;
+        // - no header and no mapping falls back to the central database, so
+        //   existing users keep working while stores are provisioned.
         try {
-            const dbName = await resolveTenantDbName(req.user.email);
+            const headerDbName = req.store?.dbName ?? null;
+            const mappedDbName = await getTenantDbNameByEmail(req.user.email);
+
+            if (headerDbName && mappedDbName && headerDbName !== mappedDbName) {
+                return next(new ApiError(403, "El usuario pertenece a otra tienda."));
+            }
+
+            const dbName = headerDbName || mappedDbName || DB_NAME;
             req.user.dbName = dbName;
-            req.tenant = {
-                email: req.user.email,
-                dbName,
-                getConnection: () => getTenantConnection(dbName),
-                getModel: (modelName) => getTenantModel(dbName, modelName)
-            };
+
+            // resolveStore already built a tenant context for this header. Keep
+            // it when it points at the same database instead of replacing it.
+            if (req.tenant?.dbName === dbName) {
+                req.tenant = { ...req.tenant, storeSlug: req.store?.slug ?? null };
+            } else {
+                req.tenant = {
+                    email: req.user.email,
+                    dbName,
+                    storeSlug: req.store?.slug ?? null,
+                    getConnection: () => getTenantConnection(dbName),
+                    getModel: (modelName) => getTenantModel(dbName, modelName)
+                };
+            }
         } catch (error) {
             console.error("Tenant resolution failed:", error);
             return next(new ApiError(503, "No se pudo resolver la tienda del usuario."));

@@ -1,7 +1,5 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { ROLES } from "../../constants/roles.js";
-import { hasRoleAtLeast } from "../../utils/roles.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { resolveFirebaseUser, toPublicUser } from "./user.service.js";
 
@@ -13,16 +11,10 @@ export const registerOrGetGoogleUser = asyncHandler(async (req, res) => {
   }
 
   const getModel = getRequestModelResolver(req);
-  const User = getModel("User");
 
-  // Las cuentas existentes siempre pueden resolver su sesión para no romper el
-  // login con Google. Solo la creación de cuentas nuevas queda restringida.
-  const existingUser = await User.findOne({ firebaseUid }).select("_id");
-
-  if (!existingUser && !hasRoleAtLeast(req, ROLES.ADMIN)) {
-    return res.status(403).json(new ApiResponse(403, {}, "error_user_creation_forbidden"));
-  }
-
+  // Any verified Firebase account may open a session: existing accounts resolve
+  // their profile and a brand-new one is created as CLIENT in the tenant
+  // database resolved for the request.
   const result = await resolveFirebaseUser({
     firebaseUid,
     email: req.user?.email,

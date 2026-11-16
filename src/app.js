@@ -2,6 +2,7 @@ import express from "express"
 import cors from "cors"
 import cookieParser from "cookie-parser"
 import { errorHandler, notFoundHandler } from "./middlewares/error.middleware.js"
+import { resolveStore } from "./middlewares/resolveStore.middleware.js"
 import path from "path"
 //import { fileURLToPath } from 'url';
 import fs from 'fs'
@@ -48,6 +49,10 @@ app.use('/api', express.json({limit: "16kb"}));
 app.use('/api', express.urlencoded({extended: true, limit: "16kb"}));
 
 app.use(cookieParser())
+
+// Resolve the store from the X-Store header before any API router runs. A
+// missing header leaves the request untouched, so existing clients keep working.
+app.use(resolveStore)
 
 //app.use('/uploads', express.static(UPLOADS_PATH));
 //app.use(express.static("public"))
