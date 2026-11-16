@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "exportedAt": "2026-11-16T01:16:08.359Z",
+  "sourceDatabase": "financeDB",
+  "collections": {
+    "Unit": [
+      {
+        "name": "Kilogramo",
+        "symbol": "kg",
+        "unitType": 0,
+        "allowDecimals": true,
+        "status": 1
+      },
+      {
+        "name": "Gramo",
+        "symbol": "g",
+        "unitType": 0,
+        "allowDecimals": true,
+        "status": 1
+      },
+      {
+        "name": "Litro",
+        "symbol": "l",
+        "unitType": 1,
+        "allowDecimals": true,
+        "status": 1
+      },
+      {
+        "name": "Mililitro",
+        "symbol": "ml",
+        "unitType": 1,
+        "allowDecimals": true,
+        "status": 1
+      },
+      {
+        "name": "Unidad",
+        "symbol": "un",
+        "unitType": 2,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Porción",
+        "symbol": "porc",
+        "unitType": 2,
+        "allowDecimals": true,
+        "status": 1
+      },
+      {
+        "name": "Pieza",
+        "symbol": "pza",
+        "unitType": 2,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Jaba",
+        "symbol": "jaba",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Saco",
+        "symbol": "saco",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Paquete",
+        "symbol": "paq",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Caja",
+        "symbol": "caja",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Balde",
+        "symbol": "balde",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "Millar",
+        "symbol": "millar",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "presa",
+        "symbol": "pza",
+        "unitType": 2,
+        "allowDecimals": false,
+        "status": 1
+      },
+      {
+        "name": "pollo entero",
+        "symbol": "pollo",
+        "unitType": 3,
+        "allowDecimals": false,
+        "status": 1
+      }
+    ],
+    "TransactionCategory": [
+      {
+        "name": "Ventas POS",
+        "type": 0,
+        "description": "Categoría por defecto para las transacciones generadas automáticamente por las Ventas (Sale)",
+        "isSystem": true,
+        "status": 1
+      },
+      {
+        "name": "Otros Ingresos",
+        "type": 0,
+        "description": "Ingresos extraordinarios no vinculados a las ventas directas del POS",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Compra de Insumos",
+        "type": 1,
+        "description": "Categoría por defecto para las transacciones generadas automáticamente por las Compras (Purchase)",
+        "isSystem": true,
+        "status": 1
+      },
+      {
+        "name": "Servicios Básicos",
+        "type": 1,
+        "description": "Pagos de luz, agua, gas (garrafas/red) e internet",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Sueldos y Personal",
+        "type": 1,
+        "description": "Pago de nómina, salarios, adelantos y bonos",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Alquiler de Local",
+        "type": 1,
+        "description": "Pago mensual del arriendo del establecimiento",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Mantenimiento y Equipos",
+        "type": 1,
+        "description": "Reparación y servicio técnico de maquinaria de cocina y local",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Empaques y Descartables",
+        "type": 1,
+        "description": "Gastos en cajas para pollo, bolsas, servilletas y cubiertos",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Transporte y Fletes",
+        "type": 1,
+        "description": "Gastos de logística, combustible y pasajes para abastecimiento",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Marketing y Publicidad",
+        "type": 1,
+        "description": "Imprenta de menús, volantes y publicidad digital",
+        "isSystem": false,
+        "status": 1
+      },
+      {
+        "name": "Caja Chica / Imprevistos",
+        "type": 1,
+        "description": "Gastos menores diarios operativos y artículos de limpieza",
+        "isSystem": false,
+        "status": 1
+      }
+    ],
+    "ProductCategory": [
+      {
+        "name": "Pollos a la Carta (o Platos Principales)",
+        "description": "Pollo entero, medio, cuarto y presas individuales servidas con sus acompañamientos tradicionales.",
+        "isSellable": true,
+        "isPurchasable": false,
+        "status": 1
+      },
+      {
+        "name": "Bebidas y Gaseosas",
+        "description": "Gaseosas embotelladas, refrescos de la casa, jugos y cervezas",
+        "isSellable": true,
+        "isPurchasable": true,
+        "status": 1
+      },
+      {
+        "name": "Guarniciones y Extras",
+        "description": "Porciones adicionales de papas fritas, arroz, ensaladas y plátanos",
+        "isSellable": true,
+        "isPurchasable": false,
+        "status": 1
+      },
+      {
+        "name": "Salsas y Cremas",
+        "description": "Porciones extra de ají de la casa, mayonesa, ketchup y aderezos",
+        "isSellable": true,
+        "isPurchasable": false,
+        "status": 1
+      },
+      {
+        "name": "Postres y Helados",
+        "description": "Postres caseros, helados envasados y dulces de venta directa",
+        "isSellable": true,
+        "isPurchasable": true,
+        "status": 1
+      },
+      {
+        "name": "Insumos - Proteínas",
+        "description": "Pollos enteros frescos crudos, menudencias y carnes para macerar",
+        "isSellable": false,
+        "isPurchasable": true,
+        "status": 1
+      },
+      {
+        "name": "Insumos - Abarrotes",
+        "description": "Sacos de papa, arroz, bidones de aceite, harina, sal y condimentos",
+        "isSellable": false,
+        "isPurchasable": true,
+        "status": 1
+      },
+      {
+        "name": "Insumos - Verduras y Frescos",
+        "description": "Verduras para ensalada: lechugas, tomates, cebollas y limones",
+        "isSellable": false,
+        "isPurchasable": true,
+        "status": 1
+      },
+      {
+        "name": "Empaques y Descartables",
+        "description": "Cajas para pollo, bolsas plásticas, vasos, cubiertos y servilletas",
+        "isSellable": false,
+        "isPurchasable": true,
+        "status": 1
+      },
+      {
+        "name": "Combos y Promociones",
+        "description": "Paquetes especiales, combos económicos, promociones familiares y comidas que incluyen bebidas y complementos.",
+        "isSellable": true,
+        "isPurchasable": true,
+        "status": 1
+      }
+    ]
+  }
+}

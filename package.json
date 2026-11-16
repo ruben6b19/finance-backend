@@ -12,6 +12,7 @@
     "expire:stale": "node scripts/expire-stale.js",
     "provision:store": "node scripts/provision-store.js",
     "seed:reference": "node scripts/copy-reference-data.js",
+    "reference:export": "node scripts/copy-reference-data.js --export data/reference-data.json",
     "db:create": "node scripts/create-atlas-database.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest"
   },

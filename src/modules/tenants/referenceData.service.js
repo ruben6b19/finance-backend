@@ -4,8 +4,15 @@ import { DB_NAME } from "../../constants.js";
  * Reference data every store needs before it can operate: units, transaction
  * categories and product categories. It lives in the central database and is
  * copied into each new store database instead of being retyped by the operator.
+ *
+ * It can also be exported to a JSON file, so the catalogue survives even if the
+ * source database is wiped or replaced.
  */
 export const REFERENCE_MODELS = ["Unit", "TransactionCategory", "ProductCategory"];
+
+// Format version of the exported JSON file. Bump it only on a breaking change:
+// an importer refuses a version it does not understand instead of guessing.
+export const REFERENCE_PACK_VERSION = 1;
 
 // Never copied between databases:
 // - _id and timestamps belong to the source document, and reusing the _id would
@@ -18,33 +25,44 @@ const DROPPED_FIELDS = new Set(["_id", "createdAt", "updatedAt", "__v", "created
 // idempotent upsert.
 const NATURAL_KEY = "name";
 
-const toInsertable = (doc) =>
+const toInsertable = (document) =>
     Object.fromEntries(
-        Object.entries(doc).filter(
+        Object.entries(document).filter(
             ([field]) => field !== NATURAL_KEY && !DROPPED_FIELDS.has(field)
         )
     );
 
+const toExportable = (document) =>
+    Object.fromEntries(
+        Object.entries(document).filter(([field]) => !DROPPED_FIELDS.has(field))
+    );
+
 const requireModelResolver = (getModel) => {
     if (typeof getModel !== "function") {
-        throw new Error("copyReferenceData requires a model resolver.");
+        throw new Error("The reference data flow requires a model resolver.");
     }
     return getModel;
 };
 
-const copyCollection = async ({ modelName, sourceDbName, targetDbName, dryRun, getModel }) => {
-    const Source = getModel(sourceDbName, modelName);
-    const Target = getModel(targetDbName, modelName);
+const readDocuments = async ({ modelName, dbName, getModel }) => {
+    const documents = await getModel(dbName, modelName).find().lean();
 
-    const documents = await Source.find().lean();
+    return documents.map((document) => {
+        const key = document[NATURAL_KEY];
+        if (typeof key !== "string" || key.trim() === "") {
+            throw new Error(`${modelName} has a document without a usable ${NATURAL_KEY}.`);
+        }
+        return toExportable(document);
+    });
+};
+
+const writeDocuments = async ({ modelName, documents, targetDbName, dryRun, getModel }) => {
+    const Target = getModel(targetDbName, modelName);
     let created = 0;
     let existing = 0;
 
     for (const document of documents) {
         const key = document[NATURAL_KEY];
-        if (typeof key !== "string" || key.trim() === "") {
-            throw new Error(`${modelName} has a document without a usable ${NATURAL_KEY}.`);
-        }
 
         if (dryRun) {
             const found = await Target.exists({ [NATURAL_KEY]: key });
@@ -74,6 +92,95 @@ const copyCollection = async ({ modelName, sourceDbName, targetDbName, dryRun, g
     return { model: modelName, read: documents.length, created, existing };
 };
 
+const summarize = (collections) => {
+    const total = collections.reduce(
+        (accumulator, entry) => ({
+            read: accumulator.read + entry.read,
+            created: accumulator.created + entry.created,
+            existing: accumulator.existing + entry.existing
+        }),
+        { read: 0, created: 0, existing: 0 }
+    );
+
+    return total;
+};
+
+const validatePack = (pack) => {
+    if (!pack || typeof pack !== "object" || typeof pack.collections !== "object") {
+        throw new Error("The reference data file is not a valid pack.");
+    }
+
+    const version = Number(pack.version ?? REFERENCE_PACK_VERSION);
+    if (!Number.isInteger(version) || version > REFERENCE_PACK_VERSION) {
+        throw new Error(
+            `Unsupported reference data pack version: ${pack.version}. ` +
+            `This build understands up to version ${REFERENCE_PACK_VERSION}.`
+        );
+    }
+
+    for (const modelName of REFERENCE_MODELS) {
+        if (!Array.isArray(pack.collections[modelName])) {
+            throw new Error(`The reference data pack is missing the "${modelName}" collection.`);
+        }
+    }
+};
+
+/**
+ * Reads the reference data of `sourceDbName` into a portable pack.
+ *
+ * The pack is plain JSON: it keeps every business field and drops the fields
+ * that only make sense inside the source database.
+ */
+export const exportReferencePack = async ({ sourceDbName = DB_NAME, getModel } = {}) => {
+    requireModelResolver(getModel);
+
+    const collections = {};
+    for (const modelName of REFERENCE_MODELS) {
+        collections[modelName] = await readDocuments({ modelName, dbName: sourceDbName, getModel });
+    }
+
+    return {
+        version: REFERENCE_PACK_VERSION,
+        exportedAt: new Date().toISOString(),
+        sourceDatabase: sourceDbName,
+        collections
+    };
+};
+
+/**
+ * Writes a pack into `targetDbName`. Same idempotency rules as copyReferenceData:
+ * a document already present (matched by name) is left untouched.
+ */
+export const importReferencePack = async ({ pack, targetDbName, dryRun = false, getModel } = {}) => {
+    requireModelResolver(getModel);
+
+    if (!targetDbName || typeof targetDbName !== "string") {
+        throw new Error("A target database name is required.");
+    }
+    validatePack(pack);
+
+    const collections = [];
+    for (const modelName of REFERENCE_MODELS) {
+        collections.push(
+            await writeDocuments({
+                modelName,
+                documents: pack.collections[modelName],
+                targetDbName,
+                dryRun,
+                getModel
+            })
+        );
+    }
+
+    return {
+        sourceDbName: pack.sourceDatabase ?? null,
+        targetDbName,
+        dryRun,
+        collections,
+        total: summarize(collections)
+    };
+};
+
 /**
  * Copies the reference data of `sourceDbName` into `targetDbName`.
  *
@@ -98,19 +205,11 @@ export const copyReferenceData = async ({
 
     const collections = [];
     for (const modelName of REFERENCE_MODELS) {
+        const documents = await readDocuments({ modelName, dbName: sourceDbName, getModel });
         collections.push(
-            await copyCollection({ modelName, sourceDbName, targetDbName, dryRun, getModel })
+            await writeDocuments({ modelName, documents, targetDbName, dryRun, getModel })
         );
     }
 
-    const total = collections.reduce(
-        (accumulator, entry) => ({
-            read: accumulator.read + entry.read,
-            created: accumulator.created + entry.created,
-            existing: accumulator.existing + entry.existing
-        }),
-        { read: 0, created: 0, existing: 0 }
-    );
-
-    return { sourceDbName, targetDbName, dryRun, collections, total };
+    return { sourceDbName, targetDbName, dryRun, collections, total: summarize(collections) };
 };
