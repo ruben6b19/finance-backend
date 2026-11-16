@@ -45,6 +45,24 @@ export async function resolveFirebaseUser({ firebaseUid, email, name, getModel }
 
   const fullName = sanitizeName(name) || nameFromEmail(normalizedEmail);
 
+  // A pre-provisioned account (create:store-superadmin) already owns the email
+  // but has no firebaseUid yet. Claiming it here is safe because Firebase has
+  // already verified that the signing-in user owns that email address. The
+  // claim only sets firebaseUid: it never touches status or role, so a banned
+  // account stays banned and the pre-provisioned SUPERADMIN role survives.
+  const unlinked = { $or: [{ firebaseUid: { $exists: false } }, { firebaseUid: null }] };
+  const pending = await User.findOne({ email: normalizedEmail, ...unlinked });
+  if (pending) {
+    const claimed = await User.findOneAndUpdate(
+      { _id: pending._id, ...unlinked },
+      { $set: { firebaseUid } },
+      { new: true }
+    );
+    // A lost race (null) falls through to the create path, whose 11000
+    // recovery handles the account that won it.
+    if (claimed) return { user: claimed };
+  }
+
   try {
     const user = await User.create({
       email: normalizedEmail,
