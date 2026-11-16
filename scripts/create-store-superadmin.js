@@ -2,30 +2,38 @@
 /**
  * Pre-provisions an internal SUPERADMIN inside an EXISTING store database.
  *
- * The account needs only an email and a full name: no Firebase user and no
- * password are created here. The account is written in Mongo and claimed on the
- * first Google login, when Firebase proves that the person signing in owns that
- * email address.
+ * The account needs an email and a full name. Without a password it is written
+ * in Mongo only: no Firebase user is created here, and the account is claimed on
+ * the first Google login, when Firebase proves that the person signing in owns
+ * that email address.
+ *
+ * With --password the account signs in with email/password instead: the password
+ * lives in Firebase Auth and its firebaseUid is bound to the Mongo account right
+ * away. That is what a support account needs to sign in to the Android app.
  *
  * The store must already exist: it is resolved from the central registry, which
  * is populated by provision:store. The global superadmin lives in the central
  * database and is never duplicated inside a store.
  *
  * Idempotent: re-running updates the same store user and keeps a single
- * TenantMapping. An existing firebaseUid is preserved, so the account is never
- * re-linked to another Firebase user.
+ * TenantMapping. An existing firebaseUid is preserved unless --password is given
+ * and Firebase returns the same uid; a different uid is refused instead of
+ * re-linking the account.
  *
  * Usage:
  *   node scripts/create-store-superadmin.js --store digital-core --email soporte@digitalcore.com --name "Soporte Digital"
+ *   node scripts/create-store-superadmin.js --store digital-core --email soporte@digitalcore.com --name "Soporte Digital" --password secret123
  *   node scripts/create-store-superadmin.js --db-name digital_core --email soporte@digitalcore.com --name "Soporte Digital" --dry-run
  *   STORE_SLUG=digital-core STORE_SUPERADMIN_EMAIL=soporte@digitalcore.com STORE_SUPERADMIN_NAME="Soporte Digital" npm run create:store-superadmin
  *
  * Options:
- *   --email <s>     Superadmin email (or STORE_SUPERADMIN_EMAIL, required)
- *   --name <s>      Display name (or STORE_SUPERADMIN_NAME, required)
- *   --store <slug>  Registry slug, e.g. digital-core (or STORE_SLUG)
- *   --db-name <s>   Store database, alternative to --store (or TENANT_DB_NAME)
- *   --dry-run       Print the plan without writing anything
+ *   --email <s>       Superadmin email (or STORE_SUPERADMIN_EMAIL, required)
+ *   --name <s>        Display name (or STORE_SUPERADMIN_NAME, required)
+ *   --store <slug>    Registry slug, e.g. digital-core (or STORE_SLUG)
+ *   --db-name <s>     Store database, alternative to --store (or TENANT_DB_NAME)
+ *   --password <s>    Firebase password, min 6 chars (or STORE_SUPERADMIN_PASSWORD)
+ *   --reset-password  Update the Firebase password if the user already exists
+ *   --dry-run         Print the plan without writing anything
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +49,7 @@ import { Store } from "../src/modules/tenants/store.model.js";
 // default (central) connection, which is what centralGetModel resolves.
 import { getTenantModel } from "../src/modules/tenants/tenantConnection.js";
 import { createStoreSuperadmin } from "../src/modules/tenants/storeAdmin.service.js";
+import { initFirebase, ensureFirebaseUser } from "./lib/firebase.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -112,6 +121,9 @@ function printSummary(result) {
         console.log("  El operador debe iniciar sesión una vez con Google usando ese email");
         console.log("  para que la cuenta quede vinculada. El rol -1 solo llega al token");
         console.log("  después de ese login nuevo (si la sesión ya estaba abierta, cerrala).");
+    } else if (result.user.link === "linked" && !result.dryRun) {
+        console.log("\nLa cuenta ya está lista:");
+        console.log(`  ${result.user.email} puede iniciar sesión con la contraseña indicada.`);
     }
 
     if (!result.dryRun) console.log("\nListo.");
@@ -120,11 +132,13 @@ function printSummary(result) {
 async function main() {
     const args = parseArgs(process.argv);
     const dryRun = args.has("dry-run");
+    const resetPassword = args.has("reset-password");
 
     const email = String(readOption(args, "email", "STORE_SUPERADMIN_EMAIL", "")).toLowerCase();
     const fullName = String(readOption(args, "name", "STORE_SUPERADMIN_NAME", ""));
     const storeSlug = String(readOption(args, "store", "STORE_SLUG", "")).toLowerCase();
     const requestedDbName = String(readOption(args, "db-name", "TENANT_DB_NAME", ""));
+    const password = String(readOption(args, "password", "STORE_SUPERADMIN_PASSWORD", ""));
 
     if (!validateEmail.test(email)) {
         throw new Error("Falta un email válido. Pasá --email o definí STORE_SUPERADMIN_EMAIL.");
@@ -133,6 +147,11 @@ async function main() {
         throw new Error(
             `El nombre "${fullName}" no es válido. Pasá --name o definí STORE_SUPERADMIN_NAME ` +
             "(solo letras y espacios, 2 a 50 caracteres)."
+        );
+    }
+    if (password && password.length < 6) {
+        throw new Error(
+            "La contraseña debe tener al menos 6 caracteres. Pasá --password o definí STORE_SUPERADMIN_PASSWORD."
         );
     }
     if (!storeSlug && !requestedDbName) {
@@ -156,6 +175,7 @@ async function main() {
     console.log(`  rol:    ${ROLES.SUPERADMIN} (interno, oculto en la app)`);
     if (storeSlug) console.log(`  tienda: ${storeSlug}`);
     else console.log(`  base de datos: ${requestedDbName}`);
+    if (password) console.log("  acceso: email/contraseña (Firebase)");
     if (dryRun) console.log("  modo:   dry-run, no se escribe nada");
 
     // Always connect to the central database: the Store registry and
@@ -168,6 +188,15 @@ async function main() {
         w: "majority"
     });
     console.log(`\nMongoDB conectado: ${mongoose.connection.host}`);
+
+    // Firebase is only initialized when a password is actually provided, so a
+    // run without one (the default, Google-login flow) never needs service
+    // credentials.
+    let firebaseAuth = null;
+    const firebaseAdapter = async (payload) => {
+        if (!firebaseAuth) firebaseAuth = initFirebase();
+        return ensureFirebaseUser(firebaseAuth, payload);
+    };
 
     try {
         // getTenantModel needs a concrete database name, so a slug-only run
@@ -193,6 +222,9 @@ async function main() {
             TenantMapping,
             centralGetModel: (modelName) => mongoose.model(modelName),
             getModel: (modelName) => getTenantModel(dbName, modelName),
+            password,
+            resetPassword,
+            ensureFirebaseUser: firebaseAdapter,
             dryRun
         });
 

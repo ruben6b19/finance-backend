@@ -42,6 +42,16 @@ const createAdmin = (overrides = {}) =>
         ...overrides
     });
 
+const buildFirebase = ({ uid = "fb-support", created = true } = {}) => {
+    const calls = [];
+    const adapter = async (payload) => {
+        calls.push(payload);
+        return { uid, created, passwordUpdated: false };
+    };
+    adapter.calls = calls;
+    return adapter;
+};
+
 beforeAll(async () => {
     mongoServer = await MongoMemoryServer.create();
     await mongoose.connect(mongoServer.getUri(), { dbName: DB_NAME });
@@ -240,5 +250,154 @@ describe("createStoreSuperadmin", () => {
         expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
         expect(await TenantMapping.countDocuments()).toBe(0);
         expect(await Store.countDocuments()).toBe(1);
+    });
+});
+
+describe("createStoreSuperadmin with a Firebase password", () => {
+    const PASSWORD = "secret123";
+
+    it("creates the account bound to the uid returned by Firebase", async () => {
+        await registerStore();
+        const firebase = buildFirebase({ uid: "fb-support-new" });
+
+        const result = await createAdmin({ password: PASSWORD, ensureFirebaseUser: firebase });
+
+        expect(result.user).toMatchObject({
+            action: "create",
+            email: ADMIN_EMAIL,
+            firebaseUid: "fb-support-new",
+            link: "linked"
+        });
+        expect(result.user.id).toBeDefined();
+        expect(firebase.calls).toEqual([
+            { email: ADMIN_EMAIL, password: PASSWORD, fullName: ADMIN_NAME, resetPassword: false }
+        ]);
+
+        const user = await storeUser({ email: ADMIN_EMAIL }).lean();
+        expect(user.firebaseUid).toBe("fb-support-new");
+        expect(user.role).toEqual([ROLES.SUPERADMIN]);
+        expect(user.status).toBe(STATUS.ACTIVE);
+    });
+
+    it("binds the uid to an existing account that had no firebaseUid", async () => {
+        await registerStore();
+        const existing = await getTenantModel(TENANT_DB, "User").create({
+            email: ADMIN_EMAIL,
+            fullName: "Soporte Viejo",
+            role: [ROLES.SELLER],
+            status: STATUS.ACTIVE
+        });
+        const firebase = buildFirebase({ uid: "fb-support-late" });
+
+        const result = await createAdmin({ password: PASSWORD, ensureFirebaseUser: firebase });
+
+        expect(result.user).toMatchObject({
+            action: "update",
+            firebaseUid: "fb-support-late",
+            link: "linked"
+        });
+
+        const user = await storeUser({ _id: existing._id }).lean();
+        expect(user.firebaseUid).toBe("fb-support-late");
+        expect(user.role).toEqual([ROLES.SUPERADMIN]);
+    });
+
+    it("accepts an existing account already bound to the same uid", async () => {
+        await registerStore();
+        const existing = await getTenantModel(TENANT_DB, "User").create({
+            email: ADMIN_EMAIL,
+            fullName: "Soporte Viejo",
+            firebaseUid: "fb-same",
+            role: [ROLES.SUPERADMIN],
+            status: STATUS.ACTIVE
+        });
+        const firebase = buildFirebase({ uid: "fb-same" });
+
+        const result = await createAdmin({ password: PASSWORD, ensureFirebaseUser: firebase });
+
+        expect(result.user).toMatchObject({
+            action: "update",
+            firebaseUid: "fb-same",
+            link: "linked"
+        });
+
+        const user = await storeUser({ _id: existing._id }).lean();
+        expect(user.firebaseUid).toBe("fb-same");
+    });
+
+    it("refuses to re-link an account bound to a different uid and writes nothing", async () => {
+        await registerStore();
+        const existing = await getTenantModel(TENANT_DB, "User").create({
+            email: ADMIN_EMAIL,
+            fullName: "Soporte Viejo",
+            firebaseUid: "fb-original",
+            role: [ROLES.SELLER],
+            status: STATUS.ACTIVE
+        });
+        const firebase = buildFirebase({ uid: "fb-hijack" });
+
+        await expect(createAdmin({ password: PASSWORD, ensureFirebaseUser: firebase }))
+            .rejects.toThrow(/ya está vinculada/);
+
+        const user = await storeUser({ _id: existing._id }).lean();
+        expect(user.firebaseUid).toBe("fb-original");
+        expect(user.role).toEqual([ROLES.SELLER]);
+        expect(await TenantMapping.countDocuments()).toBe(0);
+    });
+
+    it("forwards resetPassword to the adapter", async () => {
+        await registerStore();
+        const firebase = buildFirebase({ uid: "fb-reset" });
+
+        await createAdmin({ password: PASSWORD, resetPassword: true, ensureFirebaseUser: firebase });
+
+        expect(firebase.calls).toEqual([
+            { email: ADMIN_EMAIL, password: PASSWORD, fullName: ADMIN_NAME, resetPassword: true }
+        ]);
+    });
+
+    it("rejects a password shorter than 6 characters without calling Firebase", async () => {
+        await registerStore();
+        const firebase = buildFirebase();
+
+        await expect(createAdmin({ password: "123", ensureFirebaseUser: firebase }))
+            .rejects.toThrow(/al menos 6 caracteres/);
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
+    });
+
+    it("rejects a password when no Firebase adapter is injected", async () => {
+        await registerStore();
+
+        await expect(createAdmin({ password: PASSWORD })).rejects.toThrow(/Firebase adapter/);
+
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
+    });
+
+    it("never calls Firebase when no password is given", async () => {
+        await registerStore();
+        const firebase = buildFirebase();
+
+        const result = await createAdmin({ ensureFirebaseUser: firebase });
+
+        expect(firebase.calls).toHaveLength(0);
+        expect(result.user.link).toBe("pending-first-login");
+        expect(result.user.firebaseUid).toBeUndefined();
+    });
+
+    it("plans a link in dry-run without calling Firebase or writing", async () => {
+        await registerStore();
+        const firebase = buildFirebase();
+
+        const plan = await createAdmin({ password: PASSWORD, ensureFirebaseUser: firebase, dryRun: true });
+
+        expect(plan.dryRun).toBe(true);
+        expect(plan.user).toMatchObject({ action: "create", link: "linked" });
+        expect(plan.user.firebaseUid).toBeUndefined();
+        expect(firebase.calls).toHaveLength(0);
+
+        expect(await getTenantModel(TENANT_DB, "User").countDocuments()).toBe(0);
+        expect(await TenantMapping.countDocuments()).toBe(0);
     });
 });

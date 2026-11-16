@@ -5,19 +5,26 @@ import { validateEmail, validateName } from "../../utils/regex.js";
 /**
  * Pre-provisions an internal SUPERADMIN inside an EXISTING store database.
  *
- * The account is created in Mongo only: no Firebase user and no password. It is
- * claimed on the first Google login by `resolveFirebaseUser`, which binds the
- * verified `firebaseUid` to the account that already owns the email.
+ * The account can be created in two ways:
+ * - Email + name only: no Firebase user and no password. It is claimed on the
+ *   first Google login by `resolveFirebaseUser`, which binds the verified
+ *   `firebaseUid` to the account that already owns the email.
+ * - Email + name + password: the password lives in Firebase Auth, and the
+ *   resulting `firebaseUid` is bound to the Mongo account right away. This is
+ *   what a support account needs to sign in with email/password.
  *
  * Invariants:
  * - The global SUPERADMIN belongs to the central database. It is never
  *   duplicated inside a store, and an email already mapped to a different store
  *   is never moved automatically.
  * - An existing non-empty `firebaseUid` is preserved: an account is never
- *   re-linked to another Firebase user.
+ *   re-linked to another Firebase user. When a password is given and Firebase
+ *   returns a different uid for the email, the run fails instead of hijacking
+ *   the account.
  * - The `TenantMapping` is written last, so a failure while writing the user
  *   never routes the email to a store whose account does not exist yet.
- * - `dryRun` returns the plan without touching the database.
+ * - `dryRun` returns the plan without touching the database and without calling
+ *   Firebase.
  *
  * Models are injected so the caller decides which database each one belongs
  * to: `StoreModel` and `TenantMapping` live in the central database, while
@@ -28,10 +35,13 @@ import { validateEmail, validateName } from "../../utils/regex.js";
  * @param {string} [options.dbName] Store database name, used when no slug is given.
  * @param {string} options.email Email that will own the account; trimmed and lowercased.
  * @param {string} options.fullName Display name; letters and spaces, 2 to 50 chars.
+ * @param {string} [options.password] Firebase password, min 6 chars. Binds a Firebase user to the account.
+ * @param {boolean} [options.resetPassword=false] Update the Firebase password when the user already exists.
  * @param {object} options.StoreModel Central Store registry model.
  * @param {object} options.TenantMapping Central email -> database mapping model.
  * @param {(modelName: string) => object} options.centralGetModel Central model resolver.
  * @param {(modelName: string) => object} options.getModel Store model resolver bound to the target database.
+ * @param {Function} [options.ensureFirebaseUser] Firebase adapter, required when a password is given.
  * @param {boolean} [options.dryRun=false] Build the plan without writing.
  * @returns {Promise<{
  *   dbName: string,
@@ -46,10 +56,13 @@ export async function createStoreSuperadmin({
     dbName,
     email,
     fullName,
+    password,
+    resetPassword = false,
     StoreModel,
     TenantMapping,
     centralGetModel,
     getModel,
+    ensureFirebaseUser,
     dryRun = false
 }) {
     if (!StoreModel) {
@@ -79,6 +92,23 @@ export async function createStoreSuperadmin({
         throw new Error(
             `El nombre "${String(fullName ?? "")}" no es válido. Usá solo letras y espacios (2 a 50 caracteres).`
         );
+    }
+
+    // A password means "this account signs in with email/password", so a
+    // Firebase adapter is mandatory. It is checked even in dry-run: the plan
+    // advertises a link, and that link must be achievable in a real run.
+    const hasPassword = typeof password === "string" && password.length > 0;
+    if (hasPassword) {
+        if (typeof ensureFirebaseUser !== "function") {
+            throw new Error(
+                "createStoreSuperadmin requires a Firebase adapter when a password is provided."
+            );
+        }
+        if (password.length < 6) {
+            throw new Error(
+                "La contraseña debe tener al menos 6 caracteres. Pasá --password o definí STORE_SUPERADMIN_PASSWORD."
+            );
+        }
     }
 
     // 2. Resolve the target store from the central registry.
@@ -144,7 +174,8 @@ export async function createStoreSuperadmin({
     }
 
     // 5. Read the store account. A missing user is created; an existing one is
-    // updated, but its firebaseUid is never replaced.
+    // updated. Its firebaseUid is preserved unless this run supplies a password
+    // and Firebase returns the very same uid (or the account had none yet).
     const User = getModel("User");
 
     // Create the collection and its indexes before reading so the first run is
@@ -156,8 +187,39 @@ export async function createStoreSuperadmin({
     const existingUser = await User.findOne({ email: normalizedEmail }).lean();
     const existingFirebaseUid = readFirebaseUid(existingUser);
 
+    // A password means the account signs in with email/password: resolve the
+    // Firebase user now so its uid can be bound. Dry-run never calls Firebase;
+    // it just reports that the run would link the account.
+    let resolvedFirebaseUid = existingFirebaseUid;
+    let link;
+    if (hasPassword) {
+        if (dryRun) {
+            link = "linked";
+        } else {
+            const firebase = await ensureFirebaseUser({
+                email: normalizedEmail,
+                password,
+                fullName: normalizedName,
+                resetPassword: Boolean(resetPassword)
+            });
+            resolvedFirebaseUid = firebase.uid;
+
+            // Re-linking an account to a different Firebase user would hijack
+            // it, so a mismatch is a hard error before anything is written.
+            if (existingFirebaseUid && existingFirebaseUid !== resolvedFirebaseUid) {
+                throw new Error(
+                    `La cuenta ${normalizedEmail} ya está vinculada al firebaseUid "${existingFirebaseUid}" ` +
+                    `y Firebase devolvió "${resolvedFirebaseUid}" para ese email. ` +
+                    "No se re-vincula automáticamente."
+                );
+            }
+            link = "linked";
+        }
+    } else {
+        link = existingFirebaseUid ? "preserved" : "pending-first-login";
+    }
+
     const userAction = existingUser ? "update" : "create";
-    const link = existingFirebaseUid ? "preserved" : "pending-first-login";
 
     // 6. The mapping is only "created" when the email is unknown; a mapping that
     // already points at this database needs no write.
@@ -172,7 +234,7 @@ export async function createStoreSuperadmin({
             email: normalizedEmail,
             fullName: normalizedName,
             ...(existingUser ? { id: String(existingUser._id) } : {}),
-            ...(existingFirebaseUid ? { firebaseUid: existingFirebaseUid } : {}),
+            ...(resolvedFirebaseUid ? { firebaseUid: resolvedFirebaseUid } : {}),
             link
         },
         mapping: {
@@ -185,21 +247,27 @@ export async function createStoreSuperadmin({
     // 7. Dry-run stops here: nothing below writes.
     if (dryRun) return plan;
 
-    // 8. Write the store account first. The pre-provisioned user has no
-    // firebaseUid: the first Google login claims it. An existing uid is left
-    // untouched, and a banned account is reactivated on purpose because this is
-    // an explicit operator action.
+    // 8. Write the store account first. With a password the resolved uid is
+    // bound (created, or updated only when it differs); without one the
+    // existing uid is left untouched, and a banned account is reactivated on
+    // purpose because this is an explicit operator action.
     let userOutcome;
     if (existingUser) {
-        await User.updateOne(
-            { _id: existingUser._id },
-            { $set: { fullName: normalizedName, role: [ROLES.SUPERADMIN], status: STATUS.ACTIVE } }
-        );
+        const update = {
+            fullName: normalizedName,
+            role: [ROLES.SUPERADMIN],
+            status: STATUS.ACTIVE
+        };
+        if (hasPassword && resolvedFirebaseUid && resolvedFirebaseUid !== existingFirebaseUid) {
+            update.firebaseUid = resolvedFirebaseUid;
+        }
+        await User.updateOne({ _id: existingUser._id }, { $set: update });
         userOutcome = plan.user;
     } else {
         const created = await User.create({
             email: normalizedEmail,
             fullName: normalizedName,
+            ...(hasPassword && resolvedFirebaseUid ? { firebaseUid: resolvedFirebaseUid } : {}),
             role: [ROLES.SUPERADMIN],
             status: STATUS.ACTIVE
         });
