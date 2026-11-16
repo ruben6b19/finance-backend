@@ -218,6 +218,45 @@ products through the app or an import of its own.
 
 ---
 
+## Step 4 — a first product (optional)
+
+To prove the store can sell before loading the real catalog, create the soda:
+one product whose stock is kept in units and whose purchase unit is the box.
+
+```bash
+npm run seed:gaseosa -- --store tienda-norte --price 5 --cost-price 36
+```
+
+It resolves `Unidad` and `Caja` and the `Bebidas y Gaseosas` category from the
+store database, so step 3 must have run first. The product is created with
+`unit: Unidad`, `purchaseUnit: Caja` and `conversionFactor: 12`, which is what
+makes a purchase of one box add 12 units and a sale of one soda subtract 1.
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `--store <slug>` / `--db-name <s>` | `financeDB` | Target store |
+| `--name <s>` | `Gaseosa` | Product name |
+| `--sku <s>` | `GASEOSA` | Unique per database; this is the upsert key |
+| `--units-per-box <n>` | `12` | Must be a positive integer |
+| `--price <n>` | `0` | Sale price per unit |
+| `--cost-price <n>` | `0` | Cost per box |
+| `--opening-stock <n>` | `0` | One-time count on create only, never reset |
+| `--category-name <s>` | `Bebidas y Gaseosas` | Must already exist |
+| `--dry-run` | off | Print the plan without writing |
+
+The purchase that adds stock carries the box unit and the factor:
+
+```json
+{ "product": "<id>", "unit": "<Caja id>", "quantity": 1, "conversionFactor": 12, "unitPrice": 36, "subtotal": 36 }
+```
+
+The server fills `conversionFactor` from the product when the item omits it and
+the product declares a purchase unit, so an app that only sends `quantity: 1`
+still adds 12. An explicit factor always wins, which is how you buy loose units
+of the same product.
+
+---
+
 ## Full run, copy-paste
 
 ```bash
