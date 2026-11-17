@@ -3,7 +3,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 
 import { DB_NAME } from "../../constants.js";
 import { StoreConfig, STORE_CONFIG_KEY } from "./storeConfig.model.js";
-import { getStoreConfig } from "./storeConfig.controller.js";
+import { getPublicStoreConfig, getStoreConfig } from "./storeConfig.controller.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import esTranslations from "./es.json" with { type: "json" };
 
@@ -152,6 +152,32 @@ describe("storeConfig module", () => {
 
         const central = await StoreConfig.findOne({ key: STORE_CONFIG_KEY }).lean();
         expect(central.name).toBe("Tienda Central");
+    });
+
+    it("exposes only the name on the public route", async () => {
+        await getTenantModel(TENANT_DB, "StoreConfig").create({
+            name: "Pollería Digital Core",
+            nit: "123456789",
+            phone: "70000000",
+            address: "Av. Principal 123"
+        });
+
+        const { statusCode, payload } = await call(getPublicStoreConfig, requestFor(TENANT_DB));
+
+        expect(statusCode).toBe(200);
+        expect(payload.data).toEqual({ name: "Pollería Digital Core" });
+        expect(payload.message).toBe(esTranslations.success_store_name_fetched);
+    });
+
+    it("returns 404 on the public route when the store has no config", async () => {
+        const { statusCode, payload } = await call(getPublicStoreConfig, requestFor(DB_NAME));
+
+        expect(statusCode).toBe(404);
+        expect(payload).toEqual({
+            success: false,
+            statusCode: 404,
+            message: esTranslations.error_store_config_not_found
+        });
     });
 
     it("fails loudly when the request has no tenant context", async () => {

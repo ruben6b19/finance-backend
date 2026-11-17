@@ -15,6 +15,39 @@ const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
 };
 
+/**
+ * Public shape of the store settings: the storefront shows the store name
+ * before anyone signs in, so this route exposes only `name` and never the
+ * fiscal or contact data the authenticated route returns.
+ */
+const getPublicStoreConfig = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    // The tenant comes from the X-Store header (requireStore), because a
+    // public request has no authenticated user to resolve it from.
+    const StoreConfig = getRequestModel(req, "StoreConfig");
+
+    try {
+        const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
+            .select("name -_id")
+            .lean();
+
+        if (!config) {
+            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                { name: config.name },
+                translations[lang]?.success_store_name_fetched || "success_store_name_fetched"
+            )
+        );
+    } catch (error) {
+        console.error("Error fetching public store config:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
 const getStoreConfig = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     // Every store keeps its own settings, so the document is read from the
@@ -39,4 +72,4 @@ const getStoreConfig = asyncHandler(async (req, res) => {
     }
 });
 
-export { getStoreConfig };
+export { getStoreConfig, getPublicStoreConfig };
