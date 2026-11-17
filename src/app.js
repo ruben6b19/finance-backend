@@ -37,7 +37,7 @@ app.use(cors({
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     // Se agregan un par de headers extra que Forest Admin a veces solicita en el preflight
-    allowedHeaders: ['Content-Type', 'Authorization', 'No-Auth', 
+    allowedHeaders: ['Content-Type', 'Authorization', 'No-Auth', 'X-Store', 
     //    'X-Requested-With', 'forest-context-url', 'stripe-signature'
     ],
     credentials: true
