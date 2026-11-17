@@ -1,11 +1,12 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { getRequestModel } from "../tenants/requestModel.js";
+import { getRequestModel, getRequestModelResolver } from "../tenants/requestModel.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import { COMBO_PRODUCT_TYPE, normalizeComponents, parseNonNegativeInteger } from "../combos/comboComponents.service.js";
 
 const translations = {
     es: esTranslations,
@@ -18,10 +19,12 @@ const getLang = (req) => {
 
 const createProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const Product = getRequestModel(req, "Product");
+    const getModel = getRequestModelResolver(req);
+    const Product = getModel("Product");
     const {
         name, description, price, costPrice, stock, category,
-        sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl
+        sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
+        components, validityDays, graceDays
     } = req.body;
 
     // REGLAS DE NEGOCIO PARA VISIBILIDAD (Forzar según tipo)
@@ -51,25 +54,115 @@ const createProduct = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_product_invalid_price", 400, translations);
     }
 
+    const productFields = {
+        name: name.trim(),
+        description: description ? description.trim() : '',
+        productType: type,
+        isSellable: finalIsSellable,
+        isPurchasable: finalIsPurchasable,
+        price: Number(price),
+        costPrice: costPrice !== undefined ? Number(costPrice) : 0,
+        stock: stock !== undefined ? Number(stock) : 0,
+        category: category || null,
+        unit: unit || null,
+        purchaseUnit: purchaseUnit || null,
+        conversionFactor: conversionFactor !== undefined ? Number(conversionFactor) : 1,
+        sku: sku ? sku.trim() : undefined,
+        status: status !== undefined ? Number(status) : 1,
+        imageUrl: imageUrl || '',
+        createdBy: req.user?.mongoDbId || null
+    };
+
+    const isCombo = type === COMBO_PRODUCT_TYPE;
+
+    if (!isCombo && components !== undefined) {
+        return translateErrorResponse(res, lang, "error_product_components_require_combo_type", 400, translations);
+    }
+
+    // La vigencia y los días de gracia pertenecen a la definición del combo:
+    // 0 días de vigencia significa que el voucher nunca vence.
+    let parsedValidityDays = 0;
+    let parsedGraceDays = 0;
+
+    if (validityDays !== undefined) {
+        parsedValidityDays = parseNonNegativeInteger(validityDays);
+        if (Number.isNaN(parsedValidityDays)) {
+            return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
+        }
+    }
+
+    if (graceDays !== undefined) {
+        parsedGraceDays = parseNonNegativeInteger(graceDays);
+        if (Number.isNaN(parsedGraceDays)) {
+            return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
+        }
+    }
+
+    if (!isCombo && (validityDays !== undefined || graceDays !== undefined)) {
+        return translateErrorResponse(res, lang, "error_product_combo_settings_require_combo_type", 400, translations);
+    }
+
+    // Un combo solo es pedible con una definición activa y al menos un
+    // componente. Crearlo sin componentes dejaría un producto visible pero
+    // invendible, así que el alta crea producto, definición y componentes
+    // dentro de la misma transacción.
+    if (isCombo) {
+        const normalized = await normalizeComponents(components, getModel);
+        if (normalized.error) {
+            return translateErrorResponse(res, lang, normalized.error, 400, translations);
+        }
+
+        const ComboDefinition = getModel("ComboDefinition");
+        const ComboComponent = getModel("ComboComponent");
+
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        let committed = false;
+
+        try {
+            const [product] = await Product.create([productFields], { session });
+
+            const [definition] = await ComboDefinition.create([{
+                product: product._id,
+                referencePrice: normalized.referencePrice,
+                validityDays: parsedValidityDays,
+                graceDays: parsedGraceDays,
+                allowSubstitution: false,
+                terms: '',
+                status: 1,
+                createdBy: req.user?.mongoDbId || null
+            }], { session });
+
+            await ComboComponent.insertMany(
+                normalized.components.map((component) => ({ ...component, combo: definition._id })),
+                { session }
+            );
+
+            await session.commitTransaction();
+            committed = true;
+
+            const populatedProduct = await Product.findById(product._id).populate(['unit', 'createdBy']);
+
+            return res.status(201).json(
+                new ApiResponse(201, populatedProduct, translations[lang]?.success_product_created || "success_product_created")
+            );
+        } catch (error) {
+            if (!committed) {
+                await session.abortTransaction();
+            }
+
+            if (error.code === 11000) {
+                return translateErrorResponse(res, lang, "error_product_duplicate_sku", 409, translations);
+            }
+            console.error("Error creating combo product:", error);
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+        } finally {
+            await session.endSession();
+        }
+    }
+
     try {
-        const product = await Product.create({
-            name: name.trim(),
-            description: description ? description.trim() : '',
-            productType: type,
-            isSellable: finalIsSellable,
-            isPurchasable: finalIsPurchasable,
-            price: Number(price),
-            costPrice: costPrice !== undefined ? Number(costPrice) : 0,
-            stock: stock !== undefined ? Number(stock) : 0,
-            category: category || null,
-            unit: unit || null,
-            purchaseUnit: purchaseUnit || null,
-            conversionFactor: conversionFactor !== undefined ? Number(conversionFactor) : 1,
-            sku: sku ? sku.trim() : undefined,
-            status: status !== undefined ? Number(status) : 1,
-            imageUrl: imageUrl || '',
-            createdBy: req.user?.mongoDbId || null
-        });
+        const product = await Product.create(productFields);
 
         const populatedProduct = await Product.findById(product._id).populate(['unit', 'createdBy']);
 
@@ -162,13 +255,15 @@ const getProductById = asyncHandler(async (req, res) => {
 
 const updateProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const Product = getRequestModel(req, "Product");
+    const getModel = getRequestModelResolver(req);
+    const Product = getModel("Product");
     const { productId } = req.params;
     const body = req.body || {};
 
     const {
         name, description, price, costPrice, stock, category,
-        sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl
+        sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
+        components, validityDays, graceDays
     } = body;
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
@@ -196,7 +291,10 @@ const updateProduct = asyncHandler(async (req, res) => {
         productType === undefined &&
         purchaseUnit === undefined &&
         conversionFactor === undefined &&
-        imageUrl === undefined
+        imageUrl === undefined &&
+        components === undefined &&
+        validityDays === undefined &&
+        graceDays === undefined
     ) {
         return translateErrorResponse(res, lang, "error_product_no_fields_update", 400, translations);
     }
@@ -320,36 +418,184 @@ const updateProduct = asyncHandler(async (req, res) => {
         }
     }
 
+    // La vigencia y los días de gracia pertenecen a la definición del combo:
+    // 0 días de vigencia significa que el voucher nunca vence.
+    let parsedValidityDays;
+    let parsedGraceDays;
+
+    if (validityDays !== undefined) {
+        parsedValidityDays = parseNonNegativeInteger(validityDays);
+        if (Number.isNaN(parsedValidityDays)) {
+            return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
+        }
+    }
+
+    if (graceDays !== undefined) {
+        parsedGraceDays = parseNonNegativeInteger(graceDays);
+        if (Number.isNaN(parsedGraceDays)) {
+            return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
+        }
+    }
+
+    const existing = await Product.findById(productId).select("productType").lean();
+    if (!existing) {
+        return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
+    }
+
+    const resultingType = setFields.productType !== undefined ? setFields.productType : existing.productType;
+    const wasCombo = existing.productType === COMBO_PRODUCT_TYPE;
+    const willBeCombo = resultingType === COMBO_PRODUCT_TYPE;
+
+    const ComboDefinition = getModel("ComboDefinition");
+    const ComboComponent = getModel("ComboComponent");
+
+    // Vigencia y gracia viven en la definición del combo: enviarlas en un
+    // producto que no es combo no tendría dónde persistirse.
+    const hasComboSettings = validityDays !== undefined || graceDays !== undefined;
+    if (hasComboSettings && !willBeCombo) {
+        return translateErrorResponse(res, lang, "error_product_combo_settings_require_combo_type", 400, translations);
+    }
+
+    const comboDefinitionFields = {};
+    if (validityDays !== undefined) comboDefinitionFields.validityDays = parsedValidityDays;
+    if (graceDays !== undefined) comboDefinitionFields.graceDays = parsedGraceDays;
+
+    let normalizedCombo = null;
+    if (components !== undefined) {
+        if (!willBeCombo) {
+            return translateErrorResponse(res, lang, "error_product_components_require_combo_type", 400, translations);
+        }
+
+        normalizedCombo = await normalizeComponents(components, getModel);
+        if (normalizedCombo.error) {
+            return translateErrorResponse(res, lang, normalizedCombo.error, 400, translations);
+        }
+    } else if (willBeCombo) {
+        // Pasar a tipo combo siempre exige la receta. Editar un combo existente
+        // sin enviar componentes es válido mientras conserve los suyos, para no
+        // reactivar sin querer una definición desactivada a propósito.
+        if (!wasCombo) {
+            return translateErrorResponse(res, lang, "error_combo_components_required", 400, translations);
+        }
+
+        const definition = await ComboDefinition.findOne({ product: productId }).select("_id").lean();
+        const hasComponents = definition
+            ? await ComboComponent.exists({ combo: definition._id })
+            : false;
+
+        if (!hasComponents) {
+            return translateErrorResponse(res, lang, "error_combo_components_required", 400, translations);
+        }
+    }
+
     const updateDocument = {};
     if (Object.keys(setFields).length > 0) updateDocument.$set = setFields;
     if (Object.keys(unsetFields).length > 0) updateDocument.$unset = unsetFields;
+
+    // Solo los cambios de combo necesitan transacción: el producto y su
+    // definición/componentes deben moverse juntos. Los productos comunes siguen
+    // con un único update, que además funciona en MongoDB standalone.
+    const needsComboTransaction = normalizedCombo !== null || wasCombo !== willBeCombo || hasComboSettings;
+
+    if (!needsComboTransaction) {
+        try {
+            const updatedProduct = await Product.findByIdAndUpdate(
+                productId,
+                updateDocument,
+                { new: true, runValidators: true }
+            ).populate(['category', 'unit', 'createdBy']);
+
+            if (!updatedProduct) {
+                return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
+            }
+
+            return res.status(200).json(
+                new ApiResponse(200, updatedProduct, translations[lang]?.success_product_updated || "success_product_updated")
+            );
+        } catch (error) {
+            if (error.code === 11000) {
+                return translateErrorResponse(res, lang, "error_product_duplicate_sku", 409, translations);
+            }
+            console.error("Error updating product:", error);
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+        }
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    let committed = false;
 
     try {
         const updatedProduct = await Product.findByIdAndUpdate(
             productId,
             updateDocument,
-            { new: true, runValidators: true }
-        ).populate(['category', 'unit', 'createdBy']);
+            { new: true, runValidators: true, session }
+        );
 
         if (!updatedProduct) {
+            await session.abortTransaction();
             return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
         }
 
+        if (normalizedCombo) {
+            // Una definición por producto: el upsert no toca los vouchers ya
+            // vendidos y reemplaza la receta para las ventas futuras.
+            const definition = await ComboDefinition.findOneAndUpdate(
+                { product: productId },
+                {
+                    $set: { referencePrice: normalizedCombo.referencePrice, status: 1, ...comboDefinitionFields },
+                    $setOnInsert: { createdBy: req.user?.mongoDbId || null }
+                },
+                { new: true, upsert: true, runValidators: true, session }
+            );
+
+            await ComboComponent.deleteMany({ combo: definition._id }, { session });
+            await ComboComponent.insertMany(
+                normalizedCombo.components.map((component) => ({ ...component, combo: definition._id })),
+                { session }
+            );
+        } else if (hasComboSettings) {
+            // Solo cambia la vigencia/gracia: se actualiza la definición sin
+            // tocar componentes ni reactivar una definición desactivada.
+            await ComboDefinition.updateOne(
+                { product: productId },
+                { $set: comboDefinitionFields },
+                { runValidators: true, session }
+            );
+        } else if (wasCombo && !willBeCombo) {
+            // Deja de ser combo: se desactiva la definición para que no habilite
+            // pedidos si el producto vuelve al tipo 3 sin componentes.
+            await ComboDefinition.updateMany({ product: productId }, { $set: { status: 0 } }, { session });
+        }
+
+        await session.commitTransaction();
+        committed = true;
+
+        const populatedProduct = await Product.findById(productId)
+            .populate(['category', 'unit', 'createdBy']);
+
         return res.status(200).json(
-            new ApiResponse(200, updatedProduct, translations[lang]?.success_product_updated || "success_product_updated")
+            new ApiResponse(200, populatedProduct, translations[lang]?.success_product_updated || "success_product_updated")
         );
     } catch (error) {
+        if (!committed) {
+            await session.abortTransaction();
+        }
+
         if (error.code === 11000) {
             return translateErrorResponse(res, lang, "error_product_duplicate_sku", 409, translations);
         }
         console.error("Error updating product:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    } finally {
+        await session.endSession();
     }
 });
 
 const deleteProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
-    const Product = getRequestModel(req, "Product");
+    const getModel = getRequestModelResolver(req);
+    const Product = getModel("Product");
     const { productId } = req.params;
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
@@ -357,15 +603,61 @@ const deleteProduct = asyncHandler(async (req, res) => {
     }
 
     try {
-        const deletedProduct = await Product.findByIdAndDelete(productId);
+        const existing = await Product.findById(productId).select("productType").lean();
 
-        if (!deletedProduct) {
+        if (!existing) {
             return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
         }
 
-        return res.status(200).json(
-            new ApiResponse(200, {}, translations[lang]?.success_product_deleted || "success_product_deleted")
-        );
+        // Un producto común se borra solo; no tiene datos asociados.
+        if (existing.productType !== COMBO_PRODUCT_TYPE) {
+            await Product.findByIdAndDelete(productId);
+
+            return res.status(200).json(
+                new ApiResponse(200, {}, translations[lang]?.success_product_deleted || "success_product_deleted")
+            );
+        }
+
+        // Un combo arrastra su definición y sus componentes. Los vouchers ya
+        // vendidos conservan su copia congelada de saldos, así que se siguen
+        // canjeando: borrar la receta no toca el historial de ventas.
+        const ComboDefinition = getModel("ComboDefinition");
+        const ComboComponent = getModel("ComboComponent");
+
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        let committed = false;
+
+        try {
+            const definitions = await ComboDefinition.find({ product: productId })
+                .select("_id")
+                .session(session)
+                .lean();
+
+            const definitionIds = definitions.map((definition) => definition._id);
+
+            if (definitionIds.length > 0) {
+                await ComboComponent.deleteMany({ combo: { $in: definitionIds } }, { session });
+                await ComboDefinition.deleteMany({ product: productId }, { session });
+            }
+
+            await Product.findByIdAndDelete(productId, { session });
+
+            await session.commitTransaction();
+            committed = true;
+
+            return res.status(200).json(
+                new ApiResponse(200, {}, translations[lang]?.success_product_deleted || "success_product_deleted")
+            );
+        } catch (error) {
+            if (!committed) {
+                await session.abortTransaction();
+            }
+            console.error("Error deleting combo product:", error);
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+        } finally {
+            await session.endSession();
+        }
     } catch (error) {
         console.error("Error deleting product:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);

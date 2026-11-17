@@ -347,8 +347,7 @@ describe("updateProduct integration test", () => {
     it.each([
         [0, false, true],
         [1, true, false],
-        [2, true, true],
-        [3, true, false]
+        [2, true, true]
     ])("derives visibility flags from productType %i", async (type, expectedSellable, expectedPurchasable) => {
         const product = await createProductFixture();
 
@@ -361,6 +360,17 @@ describe("updateProduct integration test", () => {
         expect(stored.productType).toBe(type);
         expect(stored.isSellable).toBe(expectedSellable);
         expect(stored.isPurchasable).toBe(expectedPurchasable);
+    });
+
+    it("rejects productType 3 without components instead of creating an unorderable combo", async () => {
+        const product = await createProductFixture();
+
+        const result = await callUpdate(product._id.toString(), { productType: 3 });
+
+        expectTranslatedError(result, 400, "error_combo_components_required");
+
+        const stored = await Product.findById(product._id).lean();
+        expect(stored.productType).toBe(1);
     });
 
     it("ignores client-sent visibility flags when productType is omitted", async () => {
