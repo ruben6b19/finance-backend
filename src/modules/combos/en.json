@@ -9,6 +9,7 @@
     "error_combo_duplicate_component": "A product cannot appear twice in the same combo.",
     "error_combo_invalid_quantity": "The quantity or conversion factor of a component is invalid.",
     "error_combo_invalid_validity": "Validity and grace days must be integers greater than or equal to zero.",
+    "error_combo_validity_required": "Validity and grace days are missing. Send 0 if the combo should never expire.",
     "error_combo_invalid_status": "Combo status is invalid. Must be 0 (Inactive) or 1 (Active).",
     "error_combo_invalid_id": "The provided combo ID is invalid.",
     "error_combo_not_found": "Combo not found.",

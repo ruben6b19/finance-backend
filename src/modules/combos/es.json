@@ -9,6 +9,7 @@
     "error_combo_duplicate_component": "Un producto no puede repetirse en el mismo combo.",
     "error_combo_invalid_quantity": "La cantidad o el factor de conversión de un componente no es válido.",
     "error_combo_invalid_validity": "La vigencia y los días de gracia deben ser enteros mayores o iguales a cero.",
+    "error_combo_validity_required": "Faltan los datos de vigencia y días de gracia. Enviá 0 si el combo no debe vencer.",
     "error_combo_invalid_status": "El estado del combo no es válido. Debe ser 0 (Inactivo) o 1 (Activo).",
     "error_combo_invalid_id": "El ID del combo proporcionado no es válido.",
     "error_combo_not_found": "Combo no encontrado.",

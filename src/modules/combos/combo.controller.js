@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import { COMBO_PRODUCT_TYPE, normalizeComponents, parseNonNegativeInteger } from "./comboComponents.service.js";
 
 const translations = {
     es: esTranslations,
@@ -13,85 +14,6 @@ const translations = {
 
 const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
-};
-
-const COMBO_PRODUCT_TYPE = 3;
-
-const toNumber = (value) => {
-    if (value === undefined || value === null) return 0;
-    return Number.parseFloat(value.toString());
-};
-
-const round2 = (value) => Math.round(value * 100) / 100;
-
-/**
- * Valida y normaliza los componentes de un combo, y calcula su precio de
- * referencia a partir del catálogo del tenant. No escribe nada.
- * Devuelve { error: "<i18n key>" } o { components, referencePrice }.
- */
-const normalizeComponents = async (rawComponents, getModel) => {
-    if (!Array.isArray(rawComponents) || rawComponents.length === 0) {
-        return { error: "error_combo_components_required" };
-    }
-
-    const normalized = [];
-    const seenProducts = new Set();
-
-    for (const raw of rawComponents) {
-        if (!raw || !raw.product || !mongoose.Types.ObjectId.isValid(raw.product)) {
-            return { error: "error_combo_component_product_not_found" };
-        }
-
-        const productKey = String(raw.product);
-        if (seenProducts.has(productKey)) {
-            return { error: "error_combo_duplicate_component" };
-        }
-        seenProducts.add(productKey);
-
-        const quantity = raw.quantity !== undefined ? Number(raw.quantity) : 1;
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-            return { error: "error_combo_invalid_quantity" };
-        }
-
-        const conversionFactor = raw.conversionFactor !== undefined ? Number(raw.conversionFactor) : 1;
-        if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
-            return { error: "error_combo_invalid_quantity" };
-        }
-
-        if (raw.stockProduct && !mongoose.Types.ObjectId.isValid(raw.stockProduct)) {
-            return { error: "error_combo_component_product_not_found" };
-        }
-
-        normalized.push({
-            product: raw.product,
-            quantity,
-            label: raw.label ? String(raw.label).trim() : '',
-            stockProduct: raw.stockProduct || null,
-            conversionFactor
-        });
-    }
-
-    const productIds = [...seenProducts];
-    const Product = getModel("Product");
-    const products = await Product.find({ _id: { $in: productIds } });
-    const productMap = new Map(products.map((product) => [String(product._id), product]));
-
-    let referencePrice = 0;
-    for (const component of normalized) {
-        const product = productMap.get(String(component.product));
-        if (!product) {
-            return { error: "error_combo_component_product_not_found" };
-        }
-
-        // Un combo dentro de un combo vuelve recursivos el precio y los saldos.
-        if (product.productType === COMBO_PRODUCT_TYPE) {
-            return { error: "error_combo_component_is_combo" };
-        }
-
-        referencePrice += component.quantity * toNumber(product.price);
-    }
-
-    return { components: normalized, referencePrice: round2(referencePrice) };
 };
 
 const hydrateComponents = async (definitions, getModel) => {
@@ -117,6 +39,10 @@ const hydrateComponents = async (definitions, getModel) => {
 };
 
 const createCombo = asyncHandler(async (req, res) => {
+    // TEMP DEBUG: payload real que manda la app Android. Quitar cuando el
+    // contrato de validityDays/graceDays quede confirmado.
+    console.log("[createCombo] body recibido:", JSON.stringify(req.body));
+
     const lang = getLang(req);
     const getModel = getRequestModelResolver(req);
     const Product = getModel("Product");
@@ -126,6 +52,16 @@ const createCombo = asyncHandler(async (req, res) => {
         product, validityDays, graceDays, allowSubstitution,
         terms, status, components
     } = req.body;
+
+    // La app Android puede omitir estos campos. Omitirlos no es lo mismo que
+    // pedir 0 ("nunca vence"): se exige el dato explícito para no grabar un
+    // combo con una vigencia que nadie eligió.
+    const isMissingComboSetting = (value) =>
+        value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+
+    if (isMissingComboSetting(validityDays) || isMissingComboSetting(graceDays)) {
+        return translateErrorResponse(res, lang, "error_combo_validity_required", 400, translations);
+    }
 
     if (!product || !mongoose.Types.ObjectId.isValid(product)) {
         return translateErrorResponse(res, lang, "error_combo_product_required", 400, translations);
@@ -140,10 +76,9 @@ const createCombo = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_combo_product_not_combo_type", 400, translations);
     }
 
-    const parsedValidityDays = validityDays !== undefined ? Number(validityDays) : 0;
-    const parsedGraceDays = graceDays !== undefined ? Number(graceDays) : 0;
-    if (!Number.isInteger(parsedValidityDays) || parsedValidityDays < 0 ||
-        !Number.isInteger(parsedGraceDays) || parsedGraceDays < 0) {
+    const parsedValidityDays = validityDays !== undefined ? parseNonNegativeInteger(validityDays) : 0;
+    const parsedGraceDays = graceDays !== undefined ? parseNonNegativeInteger(graceDays) : 0;
+    if (Number.isNaN(parsedValidityDays) || Number.isNaN(parsedGraceDays)) {
         return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
     }
 
@@ -303,16 +238,16 @@ const updateCombo = asyncHandler(async (req, res) => {
     const updateFields = {};
 
     if (validityDays !== undefined) {
-        const parsed = Number(validityDays);
-        if (!Number.isInteger(parsed) || parsed < 0) {
+        const parsed = parseNonNegativeInteger(validityDays);
+        if (Number.isNaN(parsed)) {
             return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
         }
         updateFields.validityDays = parsed;
     }
 
     if (graceDays !== undefined) {
-        const parsed = Number(graceDays);
-        if (!Number.isInteger(parsed) || parsed < 0) {
+        const parsed = parseNonNegativeInteger(graceDays);
+        if (Number.isNaN(parsed)) {
             return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
         }
         updateFields.graceDays = parsed;

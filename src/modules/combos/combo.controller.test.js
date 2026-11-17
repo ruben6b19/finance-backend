@@ -7,6 +7,7 @@ import { ComboComponent } from "./comboComponent.model.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import { DB_NAME } from "../../constants.js";
 import { createCombo, getComboById, getCombos } from "./combo.controller.js";
+import esTranslations from "./es.json" with { type: "json" };
 
 let server;
 
@@ -124,6 +125,8 @@ describe("combo definition tenant routing", () => {
             tenantRequest({
                 body: {
                     product: String(comboProductId),
+                    validityDays: 0,
+                    graceDays: 0,
                     components: [{ product: String(componentProductId), quantity: 3 }]
                 }
             })
@@ -136,6 +139,52 @@ describe("combo definition tenant routing", () => {
         // The whole flow stays in one database: nothing may leak here.
         expect(await ComboDefinition.countDocuments()).toBe(centralDefinitionsBefore);
         expect(await ComboComponent.countDocuments()).toBe(0);
+    });
+
+    it("requires validity and grace days instead of defaulting them to zero", async () => {
+        for (const settings of [
+            {},
+            { validityDays: 0 },
+            { graceDays: 0 },
+            { validityDays: null, graceDays: 5 },
+            { validityDays: 0, graceDays: "" }
+        ]) {
+            const { statusCode, payload } = await call(
+                createCombo,
+                tenantRequest({
+                    body: {
+                        product: String(comboProductId),
+                        ...settings,
+                        components: [{ product: String(componentProductId), quantity: 3 }]
+                    }
+                })
+            );
+
+            expect(statusCode).toBe(400);
+            expect(payload.message).toBe(esTranslations.error_combo_validity_required);
+        }
+
+        expect(await tenantModel("ComboDefinition").countDocuments()).toBe(0);
+    });
+
+    it("accepts 0 as never expires", async () => {
+        const { statusCode } = await call(
+            createCombo,
+            tenantRequest({
+                body: {
+                    product: String(comboProductId),
+                    validityDays: 0,
+                    graceDays: 0,
+                    components: [{ product: String(componentProductId), quantity: 3 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+
+        const definition = await tenantModel("ComboDefinition").findOne({});
+        expect(definition.validityDays).toBe(0);
+        expect(definition.graceDays).toBe(0);
     });
 
     it("hydrates components from the tenant database on read", async () => {
