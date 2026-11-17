@@ -8,6 +8,7 @@
     "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js",
     "start": "node src/index.js",
     "seed:pollo": "node scripts/seed-pollo-product.js",
+    "seed:pollo-menu": "node scripts/seed-chicken-products.js",
     "seed:gaseosa": "node scripts/seed-gaseosa-product.js",
     "create:superadmin": "node scripts/create-superadmin.js",
     "create:store-superadmin": "node scripts/create-store-superadmin.js",

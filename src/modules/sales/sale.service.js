@@ -14,6 +14,69 @@ const stockAmount = (item) => {
     return quantity * factor;
 };
 
+const isMissingStockConfig = (value) => value === undefined || value === null || value === "";
+
+/**
+ * Resolves the derived stock configuration of sale items server-side.
+ *
+ * Products such as a chicken presentation do not hold stock themselves: they
+ * declare which product does (`stockProduct`) and how many stock units each
+ * sold unit consumes (`stockConversionFactor`). Clients that only send
+ * `product` and `quantity` therefore still get the correct stock movement.
+ *
+ * Explicit client values always win: an item is only enriched when BOTH
+ * `stockProduct` and `conversionFactor` are absent. Products without the
+ * derived configuration are left untouched. The input array is never mutated.
+ *
+ * @param {Array} items Raw sale items.
+ * @param {Function} getModel Tenant model resolver.
+ * @returns {Promise<Array>} A new array with the resolved items.
+ */
+export const resolveSaleStockItems = async (items, getModel) => {
+    if (!Array.isArray(items)) return items;
+    if (items.length === 0) return [];
+
+    const productIds = [...new Set(items
+        .filter((item) => item &&
+            isMissingStockConfig(item.stockProduct) &&
+            isMissingStockConfig(item.conversionFactor) &&
+            mongoose.Types.ObjectId.isValid(item.product))
+        .map((item) => String(item.product)))];
+
+    if (productIds.length === 0) return [...items];
+
+    const Product = getModel("Product");
+    const products = await Product.find({ _id: { $in: productIds } })
+        .select("stockProduct stockConversionFactor")
+        .lean();
+
+    const derivedByProductId = new Map(
+        products.map((product) => [String(product._id), product])
+    );
+
+    return items.map((item) => {
+        if (!item ||
+            !isMissingStockConfig(item.stockProduct) ||
+            !isMissingStockConfig(item.conversionFactor)) {
+            return item;
+        }
+
+        const derived = derivedByProductId.get(String(item.product));
+        if (!derived || !derived.stockProduct ||
+            !mongoose.Types.ObjectId.isValid(derived.stockProduct)) {
+            return item;
+        }
+
+        const rawFactor = isMissingStockConfig(derived.stockConversionFactor)
+            ? 1
+            : derived.stockConversionFactor;
+        const factor = Number(rawFactor);
+        if (!Number.isFinite(factor) || factor <= 0) return item;
+
+        return { ...item, stockProduct: derived.stockProduct, conversionFactor: factor };
+    });
+};
+
 /**
  * Aplica un movimiento de stock para los ítems de una venta.
  * direction -1 => descuenta (venta). direction +1 => repone (anulación).

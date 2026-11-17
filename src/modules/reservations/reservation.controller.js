@@ -1,6 +1,10 @@
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
-import { applyStockMovement, createSaleRecord } from "../sales/sale.service.js";
+import {
+    applyStockMovement,
+    createSaleRecord,
+    resolveSaleStockItems
+} from "../sales/sale.service.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
@@ -71,8 +75,12 @@ const createReservation = asyncHandler(async (req, res) => {
         return translateErrorResponse(res, lang, "error_reservation_invalid_dates", 400, translations);
     }
 
+    // Resolve derived stock before normalization: the normalizer fills in
+    // defaults for missing fields, so it must consume the enriched items.
+    const resolvedItems = await resolveSaleStockItems(items, getModel);
+
     const normalizedItems = [];
-    for (const item of items) {
+    for (const item of resolvedItems) {
         if (!item || !item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
             return translateErrorResponse(res, lang, "error_reservation_product_not_found", 400, translations);
         }

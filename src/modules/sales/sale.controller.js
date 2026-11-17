@@ -6,7 +6,12 @@ import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
-import { applyStockMovement, createSaleRecord, STOCK_ERROR_CODES } from "./sale.service.js";
+import {
+    applyStockMovement,
+    createSaleRecord,
+    resolveSaleStockItems,
+    STOCK_ERROR_CODES
+} from "./sale.service.js";
 import { cancelComboVouchersForSale, COMBO_VOUCHER_ERROR_CODES } from "../combos/comboPurchase.service.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast, normalizeRoles } from "../../utils/roles.js";
@@ -72,13 +77,15 @@ const createSale = asyncHandler(async (req, res) => {
     session.startTransaction();
 
     try {
+        const resolvedItems = await resolveSaleStockItems(items || [], getModel);
+
         const createdSale = await createSaleRecord({
             payload: {
                 saleNumber,
                 customerName,
                 customerPhone,
                 customerId,
-                items: items || [],
+                items: resolvedItems,
                 subtotal,
                 tax,
                 discount,

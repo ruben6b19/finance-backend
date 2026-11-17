@@ -51,6 +51,21 @@ const productSchema = new Schema(
       type: Number,
       default: 1
     },
+    // Derived stock: a sellable presentation can consume another product's
+    // inventory. Sale lines inherit both values when the client omits them.
+    stockProduct: {
+      type: Schema.Types.ObjectId,
+      ref: 'Product',
+      default: null
+    },
+    stockConversionFactor: {
+      type: Number,
+      default: 1,
+      validate: {
+        validator: (value) => value > 0,
+        message: "stockConversionFactor must be greater than 0"
+      }
+    },
     // PRECIOS
     price: { // Precio de Venta al cliente
       type: Schema.Types.Decimal128,

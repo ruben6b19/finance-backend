@@ -6,7 +6,7 @@ import { ROLES } from "../../constants/roles.js";
 import { roleAtLeast } from "../../utils/roles.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
-import { createSaleRecord } from "../sales/sale.service.js";
+import { createSaleRecord, resolveSaleStockItems } from "../sales/sale.service.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
 
 const COMBO_PRODUCT_TYPE = 3;
@@ -446,17 +446,19 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
     }
 
+    const saleItems = await resolveSaleStockItems(order.items.map(item => ({
+      product: item.product,
+      quantity: item.quantity,
+      unitPrice: toNumber(item.unitPrice),
+      subtotal: toNumber(item.subtotal)
+    })), getModel);
+
     const sale = await createSaleRecord({
       payload: {
         customerName: order.customerName,
         customerPhone: order.customerPhone,
         customerId: order.customer,
-        items: order.items.map(item => ({
-          product: item.product,
-          quantity: item.quantity,
-          unitPrice: toNumber(item.unitPrice),
-          subtotal: toNumber(item.subtotal)
-        })),
+        items: saleItems,
         subtotal: toNumber(order.total),
         tax: 0,
         discount: 0,

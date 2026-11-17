@@ -125,4 +125,24 @@ describe("catalog tenant routing", () => {
         );
         expect(centralRead.statusCode).toBe(404);
     });
+
+    it("hides inactive products from the public catalog", async () => {
+        const hidden = await tenantModel("Product").create(productFixture({
+            name: "Hidden Chicken Accumulator",
+            status: 0
+        }));
+        await tenantModel("Product").create(productFixture({
+            name: "Visible Chicken",
+            status: 1
+        }));
+
+        const list = await call(getPublicProducts, tenantRequest());
+        expect(list.statusCode).toBe(200);
+        expect(list.payload.data.products.map((product) => product.name)).toEqual(["Visible Chicken"]);
+
+        const detail = await call(getPublicProductById, tenantRequest({
+            params: { productId: String(hidden._id) }
+        }));
+        expect(detail.statusCode).toBe(404);
+    });
 });

@@ -509,4 +509,170 @@ describe("sale tenant routing", () => {
         const centralRead = await call(getSaleById, request({ params: { saleId } }));
         expect(centralRead.statusCode).toBe(404);
     });
+
+    describe("derived chicken stock", () => {
+        const MENU_PRICES = [80, 25, 17];
+
+        const createAccumulator = (stock = 100) => tenantModel("Product").create({
+            name: "Pollo (presa)",
+            productType: 2,
+            isSellable: false,
+            isPurchasable: true,
+            unit: new mongoose.Types.ObjectId(),
+            purchaseUnit: new mongoose.Types.ObjectId(),
+            conversionFactor: 8,
+            price: 0,
+            stock
+        });
+
+        const createPresentation = (accumulator, name, price, stockConversionFactor) =>
+            tenantModel("Product").create({
+                name,
+                productType: 1,
+                isSellable: true,
+                unit: new mongoose.Types.ObjectId(),
+                price,
+                stockProduct: accumulator._id,
+                stockConversionFactor
+            });
+
+        const createMenu = async (stock = 100) => {
+            const accumulator = await createAccumulator(stock);
+            const presentations = [
+                await createPresentation(accumulator, "Pollo Entero", MENU_PRICES[0], 8),
+                await createPresentation(accumulator, "Cuarto de Pollo", MENU_PRICES[1], 2),
+                await createPresentation(accumulator, "Plato Económico", MENU_PRICES[2], 1)
+            ];
+            return { accumulator, presentations };
+        };
+
+        const menuRequest = (presentations) => tenantRequest({
+            body: {
+                totalAmount: MENU_PRICES.reduce((total, price) => total + price, 0),
+                transactionCategory: new mongoose.Types.ObjectId().toString(),
+                items: presentations.map((presentation, index) => ({
+                    product: String(presentation._id),
+                    quantity: 1,
+                    unitPrice: MENU_PRICES[index],
+                    subtotal: MENU_PRICES[index]
+                })),
+                paymentStatus: 1
+            }
+        });
+
+        const stockOf = async (product) =>
+            (await tenantModel("Product").findById(product._id)).stock;
+
+        itDb("decrements the accumulator by each presentation's derived factor", async () => {
+            const { accumulator, presentations } = await createMenu();
+            const req = menuRequest(presentations);
+
+            const { statusCode } = await call(createSale, req);
+
+            expect(statusCode).toBe(201);
+            expect(await stockOf(accumulator)).toBe(100 - 8 - 2 - 1);
+            for (const presentation of presentations) {
+                expect(await stockOf(presentation)).toBe(0);
+            }
+
+            const sale = await tenantModel("Sale").findOne({});
+            expect(sale.items).toHaveLength(3);
+            expect(sale.items.map((item) => String(item.stockProduct)))
+                .toEqual(presentations.map(() => String(accumulator._id)));
+            expect(sale.items.map((item) => item.conversionFactor)).toEqual([8, 2, 1]);
+
+            // The request body belongs to the client and must stay untouched.
+            expect(req.body.items.every((item) =>
+                item.stockProduct === undefined && item.conversionFactor === undefined
+            )).toBe(true);
+        });
+
+        itDb("restores the derived amount when the sale is cancelled", async () => {
+            const { accumulator, presentations } = await createMenu();
+            const created = await call(createSale, menuRequest(presentations));
+            expect(created.statusCode).toBe(201);
+            expect(await stockOf(accumulator)).toBe(89);
+
+            const cancelled = await call(cancelSale, tenantRequest({
+                params: { saleId: String(created.payload.data._id) }
+            }));
+
+            expect(cancelled.statusCode).toBe(200);
+            expect(await stockOf(accumulator)).toBe(100);
+            expect((await tenantModel("Sale").findById(created.payload.data._id)).saleStatus).toBe(2);
+        });
+
+        itDb("restores the derived amount when the sale is deleted", async () => {
+            const { accumulator, presentations } = await createMenu();
+            const created = await call(createSale, menuRequest(presentations));
+            expect(created.statusCode).toBe(201);
+            expect(await stockOf(accumulator)).toBe(89);
+
+            const deleted = await call(deleteSale, tenantRequest({
+                params: { saleId: String(created.payload.data._id) }
+            }));
+
+            expect(deleted.statusCode).toBe(200);
+            expect(await stockOf(accumulator)).toBe(100);
+            expect(await tenantModel("Sale").countDocuments()).toBe(0);
+        });
+
+        itDb("does not overwrite explicit stockProduct or conversionFactor", async () => {
+            const { accumulator, presentations } = await createMenu();
+            const explicitTarget = await createAccumulator(50);
+            const req = tenantRequest({
+                body: {
+                    totalAmount: 160,
+                    transactionCategory: new mongoose.Types.ObjectId().toString(),
+                    items: [{
+                        product: String(presentations[0]._id),
+                        quantity: 2,
+                        unitPrice: 80,
+                        subtotal: 160,
+                        stockProduct: String(explicitTarget._id),
+                        conversionFactor: 3
+                    }],
+                    paymentStatus: 1
+                }
+            });
+
+            const { statusCode } = await call(createSale, req);
+
+            expect(statusCode).toBe(201);
+            expect(await stockOf(explicitTarget)).toBe(50 - 2 * 3);
+            expect(await stockOf(accumulator)).toBe(100);
+
+            const sale = await tenantModel("Sale").findOne({});
+            expect(String(sale.items[0].stockProduct)).toBe(String(explicitTarget._id));
+            expect(sale.items[0].conversionFactor).toBe(3);
+            expect(req.body.items[0]).toMatchObject({
+                stockProduct: String(explicitTarget._id),
+                conversionFactor: 3
+            });
+        });
+
+        itDb("keeps ordinary sales decrementing their own product", async () => {
+            const product = await createTenantProduct();
+
+            const { statusCode } = await call(createSale, sellTwoUnits(product));
+
+            expect(statusCode).toBe(201);
+            expect(await stockOf(product)).toBe(8);
+
+            const sale = await tenantModel("Sale").findOne({});
+            expect(sale.items[0].stockProduct).toBeNull();
+            expect(sale.items[0].conversionFactor).toBe(1);
+        });
+
+        itDb("rejects a derived sale when the accumulator has too little stock", async () => {
+            const { accumulator, presentations } = await createMenu(1);
+
+            const { statusCode, payload } = await call(createSale, menuRequest(presentations));
+
+            expect(statusCode).toBe(400);
+            expect(payload.message).toBe("Stock insuficiente para uno o más productos de la venta.");
+            expect(await stockOf(accumulator)).toBe(1);
+            expect(await tenantModel("Sale").countDocuments()).toBe(0);
+        });
+    });
 });
