@@ -128,7 +128,8 @@ const createSale = asyncHandler(async (req, res) => {
 });
 
 const getSales = asyncHandler(async (req, res) => {
-    console.log(`Fetching sales`);
+    // TEMP DEBUG: ver qué base y qué filtros usa el historial de ventas.
+    console.log("[getSales]", req.tenant?.dbName, JSON.stringify(req.query));
     const lang = getLang(req);
     const Sale = getRequestModel(req, "Sale");
     const pageParam = req.params.page || req.query.page;
@@ -431,6 +432,8 @@ const deleteSale = asyncHandler(async (req, res) => {
 });
 
 const getSaleSummary = asyncHandler(async (req, res) => {
+    // TEMP DEBUG: ver qué base y qué filtros usa el resumen de ventas.
+    console.log("[getSaleSummary]", req.tenant?.dbName, JSON.stringify(req.query));
     const lang = getLang(req);
     const Sale = getRequestModel(req, "Sale");
     const { startDate, endDate } = req.query;

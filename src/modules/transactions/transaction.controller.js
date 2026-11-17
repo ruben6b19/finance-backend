@@ -316,6 +316,8 @@ const deleteTransaction = asyncHandler(async (req, res) => {
 });
 
 const getTransactionSummary = asyncHandler(async (req, res) => {
+    // TEMP DEBUG: ver qué base y qué filtros usa el resumen de transacciones.
+    console.log("[getTransactionSummary]", req.tenant?.dbName, JSON.stringify(req.query));
     const lang = getLang(req);
     const Transaction = getRequestModelResolver(req)("Transaction");
     const { startDate, endDate, category, userId } = req.query;
