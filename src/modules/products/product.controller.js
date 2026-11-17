@@ -17,6 +17,121 @@ const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
 };
 
+const STOCK_TRACKED_PRODUCT_TYPES = [0, 2];
+const DERIVED_STOCK_PRODUCT_TYPES = [1, 2];
+
+const isValidObjectIdString = (value) =>
+    typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+
+// Only finite numbers and non-empty numeric strings are accepted. Booleans,
+// null, empty strings, NaN and Infinity must never be coerced into a factor.
+const isFinitePositiveStockFactor = (value) => {
+    if (typeof value === "number") return Number.isFinite(value) && value > 0;
+    if (typeof value === "string" && value.trim() !== "") {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric > 0;
+    }
+    return false;
+};
+
+/**
+ * Shared validation for the derived-stock fields (stockProduct,
+ * stockConversionFactor) used by both createProduct and updateProduct.
+ *
+ * Every lookup goes through the tenant model resolver, never the central
+ * connection. Returns either { error: <translation key> } or the resolved
+ * values that must be persisted on the product.
+ *
+ * @param {object} options
+ * @param {*} options.stockProductValue        Raw req.body.stockProduct.
+ * @param {*} options.stockFactorValue         Raw req.body.stockConversionFactor.
+ * @param {Function} options.getModel          Tenant model resolver.
+ * @param {number} options.resultingType       productType after the operation.
+ * @param {*} [options.currentStockProduct]    Existing linked stock product.
+ * @param {number} [options.currentStockFactor] Existing conversion factor.
+ * @param {string|null} [options.productId]    Product being updated (null on create).
+ * @param {boolean} [options.productTypeChanged] Whether the update changes productType.
+ */
+const resolveProductStockConfig = async ({
+    stockProductValue,
+    stockFactorValue,
+    getModel,
+    resultingType,
+    currentStockProduct = null,
+    currentStockFactor = 1,
+    productId = null,
+    productTypeChanged = false
+}) => {
+    const isClear = stockProductValue === null || stockProductValue === "";
+    const linkProvided = stockProductValue !== undefined && !isClear;
+    const factorProvided = stockFactorValue !== undefined;
+    const hasCurrentConfig = Boolean(currentStockProduct);
+    const isDerivedTypeAllowed = DERIVED_STOCK_PRODUCT_TYPES.includes(resultingType);
+
+    // An existing configuration cannot survive a switch to combos (which use
+    // component-based stock) or to an input product (type 0).
+    if (productTypeChanged && hasCurrentConfig && !isDerivedTypeAllowed) {
+        return { error: "error_product_stock_link_requires_sellable_type" };
+    }
+
+    // A clear request resets to schema defaults and ignores any factor sent
+    // alongside it.
+    if (isClear) {
+        return { stockProduct: null, stockConversionFactor: 1 };
+    }
+
+    // Nothing to validate or persist when neither field was sent.
+    if (!linkProvided && !factorProvided) {
+        return {
+            stockProduct: currentStockProduct ?? null,
+            stockConversionFactor: hasCurrentConfig ? (currentStockFactor ?? 1) : 1
+        };
+    }
+
+    // A factor without a link is meaningless unless a configuration already
+    // exists (factor-only update).
+    if (!linkProvided && factorProvided && !hasCurrentConfig) {
+        return { error: "error_product_stock_factor_requires_link" };
+    }
+
+    let resolvedFactor = 1;
+    if (factorProvided) {
+        if (!isFinitePositiveStockFactor(stockFactorValue)) {
+            return { error: "error_product_invalid_stock_factor" };
+        }
+        resolvedFactor = Number(stockFactorValue);
+    } else if (hasCurrentConfig) {
+        resolvedFactor = currentStockFactor ?? 1;
+    }
+
+    let resolvedLink = currentStockProduct ?? null;
+    if (linkProvided) {
+        if (!isDerivedTypeAllowed) {
+            return { error: "error_product_stock_link_requires_sellable_type" };
+        }
+        if (!isValidObjectIdString(stockProductValue)) {
+            return { error: "error_product_invalid_stock_reference" };
+        }
+        if (productId && String(stockProductValue) === String(productId)) {
+            return { error: "error_product_invalid_stock_reference" };
+        }
+
+        const Product = getModel("Product");
+        const target = await Product.findById(stockProductValue).select("productType").lean();
+        if (!target || !STOCK_TRACKED_PRODUCT_TYPES.includes(target.productType)) {
+            return { error: "error_product_invalid_stock_reference" };
+        }
+
+        resolvedLink = stockProductValue;
+    }
+
+    if (resolvedLink && !isDerivedTypeAllowed) {
+        return { error: "error_product_stock_link_requires_sellable_type" };
+    }
+
+    return { stockProduct: resolvedLink, stockConversionFactor: resolvedFactor };
+};
+
 const createProduct = asyncHandler(async (req, res) => {
     const lang = getLang(req);
     const getModel = getRequestModelResolver(req);
@@ -24,7 +139,7 @@ const createProduct = asyncHandler(async (req, res) => {
     const {
         name, description, price, costPrice, stock, category,
         sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
-        components, validityDays, graceDays
+        components, validityDays, graceDays, stockProduct, stockConversionFactor
     } = req.body;
 
     // REGLAS DE NEGOCIO PARA VISIBILIDAD (Forzar según tipo)
@@ -101,6 +216,18 @@ const createProduct = asyncHandler(async (req, res) => {
     if (!isCombo && (validityDays !== undefined || graceDays !== undefined)) {
         return translateErrorResponse(res, lang, "error_product_combo_settings_require_combo_type", 400, translations);
     }
+
+    const stockConfig = await resolveProductStockConfig({
+        stockProductValue: stockProduct,
+        stockFactorValue: stockConversionFactor,
+        getModel,
+        resultingType: type
+    });
+    if (stockConfig.error) {
+        return translateErrorResponse(res, lang, stockConfig.error, 400, translations);
+    }
+    productFields.stockProduct = stockConfig.stockProduct;
+    productFields.stockConversionFactor = stockConfig.stockConversionFactor;
 
     // Un combo solo es pedible con una definición activa y al menos un
     // componente. Crearlo sin componentes dejaría un producto visible pero
@@ -263,7 +390,7 @@ const updateProduct = asyncHandler(async (req, res) => {
     const {
         name, description, price, costPrice, stock, category,
         sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
-        components, validityDays, graceDays
+        components, validityDays, graceDays, stockProduct, stockConversionFactor
     } = body;
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
@@ -294,7 +421,9 @@ const updateProduct = asyncHandler(async (req, res) => {
         imageUrl === undefined &&
         components === undefined &&
         validityDays === undefined &&
-        graceDays === undefined
+        graceDays === undefined &&
+        stockProduct === undefined &&
+        stockConversionFactor === undefined
     ) {
         return translateErrorResponse(res, lang, "error_product_no_fields_update", 400, translations);
     }
@@ -437,7 +566,9 @@ const updateProduct = asyncHandler(async (req, res) => {
         }
     }
 
-    const existing = await Product.findById(productId).select("productType").lean();
+    const existing = await Product.findById(productId)
+        .select("productType stockProduct stockConversionFactor")
+        .lean();
     if (!existing) {
         return translateErrorResponse(res, lang, "error_product_not_found", 404, translations);
     }
@@ -445,6 +576,24 @@ const updateProduct = asyncHandler(async (req, res) => {
     const resultingType = setFields.productType !== undefined ? setFields.productType : existing.productType;
     const wasCombo = existing.productType === COMBO_PRODUCT_TYPE;
     const willBeCombo = resultingType === COMBO_PRODUCT_TYPE;
+
+    const stockConfig = await resolveProductStockConfig({
+        stockProductValue: stockProduct,
+        stockFactorValue: stockConversionFactor,
+        getModel,
+        resultingType,
+        currentStockProduct: existing.stockProduct,
+        currentStockFactor: existing.stockConversionFactor,
+        productId,
+        productTypeChanged: setFields.productType !== undefined
+    });
+    if (stockConfig.error) {
+        return translateErrorResponse(res, lang, stockConfig.error, 400, translations);
+    }
+    if (stockProduct !== undefined || stockConversionFactor !== undefined) {
+        setFields.stockProduct = stockConfig.stockProduct;
+        setFields.stockConversionFactor = stockConfig.stockConversionFactor;
+    }
 
     const ComboDefinition = getModel("ComboDefinition");
     const ComboComponent = getModel("ComboComponent");
