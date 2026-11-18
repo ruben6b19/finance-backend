@@ -325,6 +325,58 @@ const seedVoucherWithRedemption = async (daysAgo, quantity = 2) => {
     return { voucher: seededVoucher, redemption, code };
 };
 
+let plainVoucherSeq = 0;
+
+// Seeds a voucher whose balance has no derived stockProduct, so the component
+// product's own type decides whether redemption moves inventory.
+const seedVoucherWithPlainComponent = async ({
+    product,
+    conversionFactor = 1,
+    quantity = 2,
+    withRedemption = false
+}) => {
+    plainVoucherSeq += 1;
+    const code = `BB00${String(plainVoucherSeq).padStart(4, "0")}`;
+    const redeemedAt = boliviaDateDaysAgo(0);
+
+    const seededVoucher = await ComboPurchase.create({
+        code,
+        comboProduct: comboProductId,
+        comboDefinition: comboDefinitionId,
+        sale: new mongoose.Types.ObjectId(),
+        customerName: "Cliente",
+        customerPhone: "12345678",
+        purchasedAt: redeemedAt,
+        expiresAt: null,
+        pricePaid: 20,
+        balances: [
+            {
+                product: product._id,
+                includedQty: 5,
+                usedQty: withRedemption ? quantity : 0,
+                stockProduct: null,
+                conversionFactor
+            }
+        ],
+        totalUnits: 5,
+        usedUnits: withRedemption ? quantity : 0,
+        status: 0
+    });
+
+    let redemption = null;
+    if (withRedemption) {
+        redemption = await ComboRedemption.create({
+            comboPurchase: seededVoucher._id,
+            items: [{ product: product._id, quantity }],
+            operator: new mongoose.Types.ObjectId(),
+            redeemedAt,
+            idempotencyKey: `plain-key-${code}`
+        });
+    }
+
+    return { voucher: seededVoucher, redemption, code };
+};
+
 describe("void redemption window", () => {
     const voidRequest = (code, redemptionId, role) =>
         request({
@@ -421,6 +473,161 @@ describe("void redemption window", () => {
 
         expect(statusCode).toBe(403);
         expect(payload.message).toBe("Solo el personal autorizado puede anular un canje.");
+    });
+});
+
+describe("redemption stock for plain components", () => {
+    const plainProduct = (name, productType, stock) => Product.create({
+        name,
+        price: 8,
+        unit: new mongoose.Types.ObjectId(),
+        productType,
+        isSellable: true,
+        stock
+    });
+
+    it("decrements a tracked plain product's stock by quantity times conversionFactor", async () => {
+        const soda = await plainProduct("Plain Soda", 2, 40);
+        const { code } = await seedVoucherWithPlainComponent({
+            product: soda,
+            conversionFactor: 3,
+            quantity: 2
+        });
+
+        const { statusCode, payload } = await call(
+            createRedemption,
+            request({
+                params: { comboPurchaseId: code },
+                body: {
+                    idempotencyKey: `plain-create-${code}`,
+                    items: [{ product: String(soda._id), quantity: 2 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await Product.findById(soda._id)).stock).toBe(34);
+        expect(payload.data.comboPurchase.balances[0].usedQty).toBe(2);
+        expect(payload.data.comboPurchase.usedUnits).toBe(2);
+    });
+
+    it("restores a tracked plain product's stock when the redemption is voided", async () => {
+        const soda = await plainProduct("Plain Soda To Restore", 2, 34);
+        const { redemption, code } = await seedVoucherWithPlainComponent({
+            product: soda,
+            conversionFactor: 3,
+            quantity: 2,
+            withRedemption: true
+        });
+
+        const { statusCode, payload } = await call(
+            voidRedemption,
+            request({
+                params: { comboPurchaseId: code, redemptionId: String(redemption._id) },
+                user: { mongoDbId: new mongoose.Types.ObjectId(), role: [2] },
+                body: { voidReason: "Customer returned the product" }
+            })
+        );
+
+        expect(statusCode).toBe(200);
+        expect((await Product.findById(soda._id)).stock).toBe(40);
+        expect(payload.data.comboPurchase.balances[0].usedQty).toBe(0);
+        expect(payload.data.comboPurchase.usedUnits).toBe(0);
+    });
+
+    it.each([
+        [1, "menu"],
+        [3, "combo"]
+    ])("does not move stock for a type-%i %s component without stockProduct", async (productType, label) => {
+        const product = await plainProduct(`Non tracked ${label}`, productType, 10);
+        const { code } = await seedVoucherWithPlainComponent({ product, quantity: 2 });
+
+        const { statusCode } = await call(
+            createRedemption,
+            request({
+                params: { comboPurchaseId: code },
+                body: {
+                    idempotencyKey: `skip-create-${code}`,
+                    items: [{ product: String(product._id), quantity: 2 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await Product.findById(product._id)).stock).toBe(10);
+    });
+});
+
+describe("redemption stock for derived components", () => {
+    const trackedProduct = (name, stock) => Product.create({
+        name,
+        price: 5,
+        unit: new mongoose.Types.ObjectId(),
+        productType: 2,
+        isSellable: true,
+        stock
+    });
+
+    // A presentation product does not hold stock itself: it declares the
+    // accumulator (stockProduct) and the units consumed per sold unit.
+    const derivedPresentation = (name, presas) => Product.create({
+        name,
+        price: 12,
+        unit: presas.unit,
+        productType: 1,
+        isSellable: true,
+        stock: 0,
+        stockProduct: presas._id,
+        stockConversionFactor: 8
+    });
+
+    it("decrements the derived stock product by quantity times the product factor", async () => {
+        const presas = await trackedProduct("Pollo (presa)", 40);
+        const presentation = await derivedPresentation("Pollo Entero", presas);
+        const { code } = await seedVoucherWithPlainComponent({
+            product: presentation,
+            quantity: 1
+        });
+
+        const { statusCode, payload } = await call(
+            createRedemption,
+            request({
+                params: { comboPurchaseId: code },
+                body: {
+                    idempotencyKey: `derived-create-${code}`,
+                    items: [{ product: String(presentation._id), quantity: 1 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+        expect((await Product.findById(presas._id)).stock).toBe(32);
+        expect(payload.data.comboPurchase.balances[0].usedQty).toBe(1);
+        expect(payload.data.comboPurchase.usedUnits).toBe(1);
+    });
+
+    it("restores the derived stock product when the redemption is voided", async () => {
+        const presas = await trackedProduct("Pollo (presa) to restore", 40);
+        const presentation = await derivedPresentation("Pollo Entero to restore", presas);
+        const { redemption, code } = await seedVoucherWithPlainComponent({
+            product: presentation,
+            quantity: 1,
+            withRedemption: true
+        });
+
+        const { statusCode, payload } = await call(
+            voidRedemption,
+            request({
+                params: { comboPurchaseId: code, redemptionId: String(redemption._id) },
+                user: { mongoDbId: new mongoose.Types.ObjectId(), role: [2] },
+                body: { voidReason: "Customer returned the product" }
+            })
+        );
+
+        expect(statusCode).toBe(200);
+        expect((await Product.findById(presas._id)).stock).toBe(48);
+        expect(payload.data.comboPurchase.balances[0].usedQty).toBe(0);
+        expect(payload.data.comboPurchase.usedUnits).toBe(0);
     });
 });
 

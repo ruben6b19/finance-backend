@@ -1,8 +1,8 @@
 import mongoose, { Schema } from 'mongoose';
 
-// Qué incluye un combo. Una fila por producto incluido.
-// `stockProduct: null` significa que el componente no toca inventario (pollo),
-// mientras que un componente embotellado apunta a su producto de stock.
+// One row per product included in a combo. Derived products resolve their
+// stock target and factor at combo creation and again at redemption; a null
+// stockProduct only means no derived target was resolved for the component.
 const comboComponentSchema = new Schema(
   {
     combo: {

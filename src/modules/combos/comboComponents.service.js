@@ -11,6 +11,10 @@ const toNumber = (value) => {
 
 const round2 = (value) => Math.round(value * 100) / 100;
 
+// Mirrors resolveSaleStockItems: a config counts as absent when it is
+// undefined, null or empty. Client-provided values always win.
+const isMissingStockConfig = (value) => value === undefined || value === null || value === "";
+
 /**
  * Vigencia y días de gracia: 0 es válido y significa "nunca vence". null, ""
  * y cualquier valor no numérico son inválidos; no deben convertirse en 0 por
@@ -44,6 +48,7 @@ export const normalizeComponents = async (rawComponents, getModel) => {
 
     const normalized = [];
     const seenProducts = new Set();
+    const enrichableProductKeys = new Set();
 
     for (const raw of rawComponents) {
         if (!raw || !raw.product || !mongoose.Types.ObjectId.isValid(raw.product)) {
@@ -61,13 +66,20 @@ export const normalizeComponents = async (rawComponents, getModel) => {
             return { error: "error_combo_invalid_quantity" };
         }
 
-        const conversionFactor = raw.conversionFactor !== undefined ? Number(raw.conversionFactor) : 1;
+        const stockProductMissing = isMissingStockConfig(raw.stockProduct);
+        const conversionFactorMissing = isMissingStockConfig(raw.conversionFactor);
+        const conversionFactor = conversionFactorMissing ? 1 : Number(raw.conversionFactor);
         if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
             return { error: "error_combo_invalid_quantity" };
         }
 
         if (raw.stockProduct && !mongoose.Types.ObjectId.isValid(raw.stockProduct)) {
             return { error: "error_combo_component_product_not_found" };
+        }
+
+        // Only enrich when the client sent neither config field.
+        if (stockProductMissing && conversionFactorMissing) {
+            enrichableProductKeys.add(productKey);
         }
 
         normalized.push({
@@ -100,6 +112,22 @@ export const normalizeComponents = async (rawComponents, getModel) => {
         // se usa el nombre del producto, igual que en los combos creados a mano.
         if (!component.label) {
             component.label = product.name;
+        }
+
+        // Derived products (e.g. chicken presentations) do not hold stock
+        // themselves. Freeze the resolved target and factor on the component
+        // so later voucher issuance and redemption agree with sales.
+        if (enrichableProductKeys.has(String(component.product)) &&
+            product.stockProduct &&
+            mongoose.Types.ObjectId.isValid(product.stockProduct)) {
+            const rawFactor = isMissingStockConfig(product.stockConversionFactor)
+                ? 1
+                : product.stockConversionFactor;
+            const factor = Number(rawFactor);
+            if (Number.isFinite(factor) && factor > 0) {
+                component.stockProduct = product.stockProduct;
+                component.conversionFactor = factor;
+            }
         }
 
         referencePrice += component.quantity * toNumber(product.price);

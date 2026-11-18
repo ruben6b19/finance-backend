@@ -324,14 +324,50 @@ const createRedemption = asyncHandler(async (req, res) => {
             currentBalances.set(String(balance.product), balance);
         }
 
-        // Solo los componentes con stockProduct mueven inventario.
+        // Balances with their own stockProduct are self-contained; for the
+        // others, resolve the component product's live derived stock config.
+        // Menu (1) and combo (3) products without derivation hold no stock.
+        const plainComponentIds = [...new Set(normalizedItems
+            .map((item) => {
+                const balance = currentBalances.get(String(item.product));
+                return balance && !balance.stockProduct ? String(balance.product) : null;
+            })
+            .filter(Boolean))];
+
+        const componentProducts = new Map();
+        if (plainComponentIds.length) {
+            const products = await Product.find({ _id: { $in: plainComponentIds } })
+                .select("productType stockProduct stockConversionFactor")
+                .session(session)
+                .lean();
+            for (const product of products) {
+                componentProducts.set(String(product._id), product);
+            }
+        }
+
         for (const item of normalizedItems) {
             const balance = currentBalances.get(String(item.product));
-            if (!balance || !balance.stockProduct) continue;
+            if (!balance) continue;
 
-            const amount = item.quantity * toNumber(balance.conversionFactor ?? 1);
+            const derived = componentProducts.get(String(balance.product));
+            const derivedTarget = derived?.stockProduct && mongoose.Types.ObjectId.isValid(derived.stockProduct)
+                ? String(derived.stockProduct) : null;
+            const stockTargetId = balance.stockProduct || derivedTarget || balance.product;
+            const tracksStock = Boolean(balance.stockProduct || derivedTarget) ||
+                [0, 2].includes(derived?.productType);
+            if (!tracksStock) continue;
+
+            // A balance with its own stockProduct is self-contained (frozen at
+            // purchase) -> use its conversionFactor. Without a derived target
+            // the product has no derivation to borrow, so the balance's frozen
+            // factor still wins. Only a genuinely derived component uses the
+            // product's live stockConversionFactor (schema default 1).
+            const factor = balance.stockProduct || !derivedTarget
+                ? toNumber(balance.conversionFactor ?? 1)
+                : toNumber(derived.stockConversionFactor ?? balance.conversionFactor ?? 1);
+            const amount = item.quantity * factor;
             const result = await Product.updateOne(
-                { _id: balance.stockProduct, stock: { $gte: amount } },
+                { _id: stockTargetId, stock: { $gte: amount } },
                 { $inc: { stock: -amount } },
                 { session }
             );
@@ -527,16 +563,50 @@ const voidRedemption = asyncHandler(async (req, res) => {
                 balanceByProduct.set(String(balance.product), balance);
             }
 
-            // d. Restaurar solo el stock que el canje había descontado.
+            // d. Restore exactly what the redemption decremented, using the
+            // same stock rule: derived target or tracked plain product (0/2).
+            const plainComponentIds = [...new Set(claimed.items
+                .map((item) => {
+                    const balance = balanceByProduct.get(String(item.product));
+                    return balance && !balance.stockProduct ? String(balance.product) : null;
+                })
+                .filter(Boolean))];
+
+            const componentProducts = new Map();
+            if (plainComponentIds.length) {
+                const products = await Product.find({ _id: { $in: plainComponentIds } })
+                    .select("productType stockProduct stockConversionFactor")
+                    .session(session)
+                    .lean();
+                for (const product of products) {
+                    componentProducts.set(String(product._id), product);
+                }
+            }
+
             for (const item of claimed.items) {
                 const balance = balanceByProduct.get(String(item.product));
-                if (!balance || !balance.stockProduct) continue;
+                if (!balance) continue;
 
-                const amount = toNumber(item.quantity) * toNumber(balance.conversionFactor ?? 1);
+                const derived = componentProducts.get(String(balance.product));
+                const derivedTarget = derived?.stockProduct && mongoose.Types.ObjectId.isValid(derived.stockProduct)
+                    ? String(derived.stockProduct) : null;
+                const stockTargetId = balance.stockProduct || derivedTarget || balance.product;
+                const tracksStock = Boolean(balance.stockProduct || derivedTarget) ||
+                    [0, 2].includes(derived?.productType);
+                if (!tracksStock) continue;
+
+                // Keep the decrement/restore factors in sync: a frozen
+                // stockProduct (or a product with no derived target) uses the
+                // balance factor; only a genuinely derived component borrows
+                // the product's live stockConversionFactor (schema default 1).
+                const factor = balance.stockProduct || !derivedTarget
+                    ? toNumber(balance.conversionFactor ?? 1)
+                    : toNumber(derived.stockConversionFactor ?? balance.conversionFactor ?? 1);
+                const amount = toNumber(item.quantity) * factor;
                 if (!Number.isFinite(amount) || amount <= 0) continue;
 
                 await Product.updateOne(
-                    { _id: balance.stockProduct },
+                    { _id: stockTargetId },
                     { $inc: { stock: amount } },
                     { session }
                 );

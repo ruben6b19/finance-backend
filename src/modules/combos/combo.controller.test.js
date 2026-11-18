@@ -141,6 +141,45 @@ describe("combo definition tenant routing", () => {
         expect(await ComboComponent.countDocuments()).toBe(0);
     });
 
+    it("resolves a derived component's stock target and factor when the client omits them", async () => {
+        const presas = await tenantModel("Product").create({
+            name: "Tenant Pollo (presa)",
+            price: 2,
+            unit: new mongoose.Types.ObjectId(),
+            productType: 2,
+            isSellable: true,
+            stock: 100
+        });
+        const presentation = await tenantModel("Product").create({
+            name: "Tenant Pollo Entero",
+            price: 12,
+            unit: presas.unit,
+            productType: 1,
+            isSellable: true,
+            stock: 0,
+            stockProduct: presas._id,
+            stockConversionFactor: 8
+        });
+
+        const { statusCode } = await call(
+            createCombo,
+            tenantRequest({
+                body: {
+                    product: String(comboProductId),
+                    validityDays: 0,
+                    graceDays: 0,
+                    // No stockProduct or conversionFactor sent by the client.
+                    components: [{ product: String(presentation._id), quantity: 2 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(201);
+        const saved = await tenantModel("ComboComponent").findOne({});
+        expect(String(saved.stockProduct)).toBe(String(presas._id));
+        expect(saved.conversionFactor).toBe(8);
+    });
+
     it("requires validity and grace days instead of defaulting them to zero", async () => {
         for (const settings of [
             {},
