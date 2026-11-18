@@ -187,6 +187,70 @@ describe("combo definition tenant routing", () => {
         expect(definition.graceDays).toBe(0);
     });
 
+    it("rejects a component product that does not exist", async () => {
+        const { statusCode, payload } = await call(
+            createCombo,
+            tenantRequest({
+                body: {
+                    product: String(comboProductId),
+                    validityDays: 0,
+                    graceDays: 0,
+                    components: [{ product: new mongoose.Types.ObjectId().toString(), quantity: 3 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(400);
+        expect(payload.message).toBe(esTranslations.error_combo_component_product_not_found);
+        expect(await tenantModel("ComboDefinition").countDocuments()).toBe(0);
+        expect(await tenantModel("ComboComponent").countDocuments()).toBe(0);
+    });
+
+    it("rejects a component that is itself a combo product", async () => {
+        const { statusCode, payload } = await call(
+            createCombo,
+            tenantRequest({
+                body: {
+                    product: String(comboProductId),
+                    validityDays: 0,
+                    graceDays: 0,
+                    components: [{ product: String(comboProductId), quantity: 3 }]
+                }
+            })
+        );
+
+        expect(statusCode).toBe(400);
+        expect(payload.message).toBe(esTranslations.error_combo_component_is_combo);
+        expect(await tenantModel("ComboDefinition").countDocuments()).toBe(0);
+        expect(await tenantModel("ComboComponent").countDocuments()).toBe(0);
+    });
+
+    it("rejects negative or non-integer validity and grace days", async () => {
+        for (const settings of [
+            { validityDays: -1, graceDays: 0 },
+            { validityDays: 0, graceDays: -1 },
+            { validityDays: 1.5, graceDays: 0 },
+            { validityDays: 0, graceDays: 1.5 }
+        ]) {
+            const { statusCode, payload } = await call(
+                createCombo,
+                tenantRequest({
+                    body: {
+                        product: String(comboProductId),
+                        ...settings,
+                        components: [{ product: String(componentProductId), quantity: 3 }]
+                    }
+                })
+            );
+
+            expect(statusCode).toBe(400);
+            expect(payload.message).toBe(esTranslations.error_combo_invalid_validity);
+        }
+
+        expect(await tenantModel("ComboDefinition").countDocuments()).toBe(0);
+        expect(await tenantModel("ComboComponent").countDocuments()).toBe(0);
+    });
+
     it("hydrates components from the tenant database on read", async () => {
         const definition = await tenantModel("ComboDefinition").create({
             product: comboProductId,

@@ -379,15 +379,18 @@ describe("updateProduct integration test", () => {
         expect(stored.isPurchasable).toBe(expectedPurchasable);
     });
 
-    it("rejects productType 3 without components instead of creating an unorderable combo", async () => {
+    it("allows productType 3 without components so combos can be configured later", async () => {
         const product = await createProductFixture();
 
         const result = await callUpdate(product._id.toString(), { productType: 3 });
 
-        expectTranslatedError(result, 400, "error_combo_components_required");
+        expect(result.next).not.toHaveBeenCalled();
+        expect(result.res.status).toHaveBeenCalledWith(200);
 
         const stored = await Product.findById(product._id).lean();
-        expect(stored.productType).toBe(1);
+        expect(stored.productType).toBe(3);
+        expect(stored.isSellable).toBe(true);
+        expect(stored.isPurchasable).toBe(false);
     });
 
     it("ignores client-sent visibility flags when productType is omitted", async () => {

@@ -139,7 +139,7 @@ const createProduct = asyncHandler(async (req, res) => {
     const {
         name, description, price, costPrice, stock, category,
         sku, unit, status, productType, purchaseUnit, conversionFactor, imageUrl,
-        components, validityDays, graceDays, stockProduct, stockConversionFactor
+        stockProduct, stockConversionFactor
     } = req.body;
 
     // REGLAS DE NEGOCIO PARA VISIBILIDAD (Forzar según tipo)
@@ -188,35 +188,6 @@ const createProduct = asyncHandler(async (req, res) => {
         createdBy: req.user?.mongoDbId || null
     };
 
-    const isCombo = type === COMBO_PRODUCT_TYPE;
-
-    if (!isCombo && components !== undefined) {
-        return translateErrorResponse(res, lang, "error_product_components_require_combo_type", 400, translations);
-    }
-
-    // La vigencia y los días de gracia pertenecen a la definición del combo:
-    // 0 días de vigencia significa que el voucher nunca vence.
-    let parsedValidityDays = 0;
-    let parsedGraceDays = 0;
-
-    if (validityDays !== undefined) {
-        parsedValidityDays = parseNonNegativeInteger(validityDays);
-        if (Number.isNaN(parsedValidityDays)) {
-            return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
-        }
-    }
-
-    if (graceDays !== undefined) {
-        parsedGraceDays = parseNonNegativeInteger(graceDays);
-        if (Number.isNaN(parsedGraceDays)) {
-            return translateErrorResponse(res, lang, "error_combo_invalid_validity", 400, translations);
-        }
-    }
-
-    if (!isCombo && (validityDays !== undefined || graceDays !== undefined)) {
-        return translateErrorResponse(res, lang, "error_product_combo_settings_require_combo_type", 400, translations);
-    }
-
     const stockConfig = await resolveProductStockConfig({
         stockProductValue: stockProduct,
         stockFactorValue: stockConversionFactor,
@@ -228,65 +199,6 @@ const createProduct = asyncHandler(async (req, res) => {
     }
     productFields.stockProduct = stockConfig.stockProduct;
     productFields.stockConversionFactor = stockConfig.stockConversionFactor;
-
-    // Un combo solo es pedible con una definición activa y al menos un
-    // componente. Crearlo sin componentes dejaría un producto visible pero
-    // invendible, así que el alta crea producto, definición y componentes
-    // dentro de la misma transacción.
-    if (isCombo) {
-        const normalized = await normalizeComponents(components, getModel);
-        if (normalized.error) {
-            return translateErrorResponse(res, lang, normalized.error, 400, translations);
-        }
-
-        const ComboDefinition = getModel("ComboDefinition");
-        const ComboComponent = getModel("ComboComponent");
-
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        let committed = false;
-
-        try {
-            const [product] = await Product.create([productFields], { session });
-
-            const [definition] = await ComboDefinition.create([{
-                product: product._id,
-                referencePrice: normalized.referencePrice,
-                validityDays: parsedValidityDays,
-                graceDays: parsedGraceDays,
-                allowSubstitution: false,
-                terms: '',
-                status: 1,
-                createdBy: req.user?.mongoDbId || null
-            }], { session });
-
-            await ComboComponent.insertMany(
-                normalized.components.map((component) => ({ ...component, combo: definition._id })),
-                { session }
-            );
-
-            await session.commitTransaction();
-            committed = true;
-
-            const populatedProduct = await Product.findById(product._id).populate(['unit', 'createdBy']);
-
-            return res.status(201).json(
-                new ApiResponse(201, populatedProduct, translations[lang]?.success_product_created || "success_product_created")
-            );
-        } catch (error) {
-            if (!committed) {
-                await session.abortTransaction();
-            }
-
-            if (error.code === 11000) {
-                return translateErrorResponse(res, lang, "error_product_duplicate_sku", 409, translations);
-            }
-            console.error("Error creating combo product:", error);
-            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
-        } finally {
-            await session.endSession();
-        }
-    }
 
     try {
         const product = await Product.create(productFields);
@@ -619,32 +531,16 @@ const updateProduct = asyncHandler(async (req, res) => {
         if (normalizedCombo.error) {
             return translateErrorResponse(res, lang, normalizedCombo.error, 400, translations);
         }
-    } else if (willBeCombo) {
-        // Pasar a tipo combo siempre exige la receta. Editar un combo existente
-        // sin enviar componentes es válido mientras conserve los suyos, para no
-        // reactivar sin querer una definición desactivada a propósito.
-        if (!wasCombo) {
-            return translateErrorResponse(res, lang, "error_combo_components_required", 400, translations);
-        }
-
-        const definition = await ComboDefinition.findOne({ product: productId }).select("_id").lean();
-        const hasComponents = definition
-            ? await ComboComponent.exists({ combo: definition._id })
-            : false;
-
-        if (!hasComponents) {
-            return translateErrorResponse(res, lang, "error_combo_components_required", 400, translations);
-        }
     }
 
     const updateDocument = {};
     if (Object.keys(setFields).length > 0) updateDocument.$set = setFields;
     if (Object.keys(unsetFields).length > 0) updateDocument.$unset = unsetFields;
 
-    // Solo los cambios de combo necesitan transacción: el producto y su
-    // definición/componentes deben moverse juntos. Los productos comunes siguen
-    // con un único update, que además funciona en MongoDB standalone.
-    const needsComboTransaction = normalizedCombo !== null || wasCombo !== willBeCombo || hasComboSettings;
+    // Solo los cambios que afectan la definición/componentes del combo necesitan
+    // transacción. Un producto base de tipo 3 se edita como cualquier otro, así
+    // que el simple cambio de tipo no la requiere (y funciona en MongoDB standalone).
+    const needsComboTransaction = normalizedCombo !== null || (wasCombo && !willBeCombo) || hasComboSettings;
 
     if (!needsComboTransaction) {
         try {

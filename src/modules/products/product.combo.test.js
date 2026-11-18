@@ -158,16 +158,13 @@ describe("combo products created through the products API", () => {
     });
 
     describe("createProduct", () => {
-        it("creates the combo product, its active definition and its components", async () => {
-            const component = await createComponentProduct();
-
+        it("creates only the base combo product without a definition or components", async () => {
             const result = await call(createProduct, request({
                 body: {
                     name: "Combo gaseosas",
                     price: 25,
                     unit: newUnitId(),
-                    productType: 3,
-                    components: [{ product: String(component._id), quantity: 5 }]
+                    productType: 3
                 }
             }));
 
@@ -180,23 +177,11 @@ describe("combo products created through the products API", () => {
             expect(product.isSellable).toBe(true);
             expect(product.isPurchasable).toBe(false);
 
-            const definition = await ComboDefinition.findOne({ product: product._id });
-            expect(definition).not.toBeNull();
-            expect(definition.status).toBe(1);
-            expect(definition.referencePrice.toString()).toBe("35");
-
-            const components = await ComboComponent.find({ combo: definition._id });
-            expect(components).toHaveLength(1);
-            expect(String(components[0].product)).toBe(String(component._id));
-            expect(components[0].quantity).toBe(5);
-            expect(components[0].label).toBe("Gaseosa");
-
-            // Sin vigencia ni gracia enviadas, el combo nunca vence.
-            expect(definition.validityDays).toBe(0);
-            expect(definition.graceDays).toBe(0);
+            expect(await ComboDefinition.countDocuments()).toBe(0);
+            expect(await ComboComponent.countDocuments()).toBe(0);
         });
 
-        it("stores validity and grace days on the combo definition", async () => {
+        it("ignores components and validity settings when creating the base product", async () => {
             const component = await createComponentProduct();
 
             const result = await call(createProduct, request({
@@ -215,34 +200,13 @@ describe("combo products created through the products API", () => {
             expect(result.statusCode).toBe(201);
 
             const product = await Product.findOne({ name: "Combo con vigencia" });
-            const definition = await ComboDefinition.findOne({ product: product._id });
-            expect(definition.validityDays).toBe(30);
-            expect(definition.graceDays).toBe(5);
+            expect(product).not.toBeNull();
+            expect(product.productType).toBe(3);
+            expect(await ComboDefinition.countDocuments()).toBe(0);
+            expect(await ComboComponent.countDocuments()).toBe(0);
         });
 
-        it("rejects negative validity or grace days", async () => {
-            const component = await createComponentProduct();
-
-            for (const invalid of [{ validityDays: -1 }, { graceDays: -1 }, { validityDays: 1.5 }, { validityDays: null }, { validityDays: "" }, { graceDays: "" }]) {
-                const result = await call(createProduct, request({
-                    body: {
-                        name: "Combo inválido",
-                        price: 25,
-                        unit: newUnitId(),
-                        productType: 3,
-                        ...invalid,
-                        components: [{ product: String(component._id), quantity: 5 }]
-                    }
-                }));
-
-                expect(result.statusCode).toBe(400);
-                expect(result.payload.message).toBe(esTranslations.error_combo_invalid_validity);
-            }
-
-            expect(await Product.countDocuments({ name: "Combo inválido" })).toBe(0);
-        });
-
-        it("rejects validity or grace days on a non-combo product", async () => {
+        it("ignores validity settings on a non-combo product", async () => {
             const result = await call(createProduct, request({
                 body: {
                     name: "Gaseosa con vigencia",
@@ -253,12 +217,14 @@ describe("combo products created through the products API", () => {
                 }
             }));
 
-            expect(result.statusCode).toBe(400);
-            expect(result.payload.message).toBe(esTranslations.error_product_combo_settings_require_combo_type);
-            expect(await Product.countDocuments({ name: "Gaseosa con vigencia" })).toBe(0);
+            expect(result.error).toBeUndefined();
+            expect(result.statusCode).toBe(201);
+            expect(await Product.countDocuments({ name: "Gaseosa con vigencia" })).toBe(1);
+            expect(await ComboDefinition.countDocuments()).toBe(0);
+            expect(await ComboComponent.countDocuments()).toBe(0);
         });
 
-        it("rejects a combo product with no components and writes nothing", async () => {
+        it("accepts a combo product with no components", async () => {
             const result = await call(createProduct, request({
                 body: {
                     name: "Combo vacío",
@@ -269,13 +235,13 @@ describe("combo products created through the products API", () => {
             }));
 
             expect(result.error).toBeUndefined();
-            expect(result.statusCode).toBe(400);
-            expect(result.payload.message).toBe(esTranslations.error_combo_components_required);
-            expect(await Product.countDocuments()).toBe(0);
+            expect(result.statusCode).toBe(201);
+            expect(await Product.countDocuments({ name: "Combo vacío" })).toBe(1);
             expect(await ComboDefinition.countDocuments()).toBe(0);
+            expect(await ComboComponent.countDocuments()).toBe(0);
         });
 
-        it("rejects components on a non-combo product", async () => {
+        it("ignores components on a non-combo product", async () => {
             const component = await createComponentProduct();
 
             const result = await call(createProduct, request({
@@ -288,43 +254,11 @@ describe("combo products created through the products API", () => {
                 }
             }));
 
-            expect(result.statusCode).toBe(400);
-            expect(result.payload.message).toBe(esTranslations.error_product_components_require_combo_type);
-            expect(await Product.countDocuments({ name: "Gaseosa suelta" })).toBe(0);
-        });
-
-        it("rejects an unknown component and writes nothing", async () => {
-            const result = await call(createProduct, request({
-                body: {
-                    name: "Combo roto",
-                    price: 10,
-                    unit: newUnitId(),
-                    productType: 3,
-                    components: [{ product: new mongoose.Types.ObjectId().toString(), quantity: 1 }]
-                }
-            }));
-
-            expect(result.statusCode).toBe(400);
-            expect(result.payload.message).toBe(esTranslations.error_combo_component_product_not_found);
-            expect(await Product.countDocuments()).toBe(0);
-        });
-
-        it("rejects a component that is itself a combo", async () => {
-            const { combo } = await seedCombo();
-
-            const result = await call(createProduct, request({
-                body: {
-                    name: "Combo anidado",
-                    price: 50,
-                    unit: newUnitId(),
-                    productType: 3,
-                    components: [{ product: String(combo._id), quantity: 1 }]
-                }
-            }));
-
-            expect(result.statusCode).toBe(400);
-            expect(result.payload.message).toBe(esTranslations.error_combo_component_is_combo);
-            expect(await Product.countDocuments({ name: "Combo anidado" })).toBe(0);
+            expect(result.error).toBeUndefined();
+            expect(result.statusCode).toBe(201);
+            expect(await Product.countDocuments({ name: "Gaseosa suelta" })).toBe(1);
+            expect(await ComboDefinition.countDocuments()).toBe(0);
+            expect(await ComboComponent.countDocuments()).toBe(0);
         });
     });
 
@@ -491,7 +425,7 @@ describe("combo products created through the products API", () => {
             expect(updatedDefinition.status).toBe(0);
         });
 
-        it("rejects a combo update without components when no definition exists", async () => {
+        it("updates a combo without components when no definition exists", async () => {
             const combo = await Product.create({
                 name: "Combo sin definición",
                 price: 25,
@@ -504,8 +438,13 @@ describe("combo products created through the products API", () => {
                 body: { price: 30 }
             }));
 
-            expect(result.statusCode).toBe(400);
-            expect(result.payload.message).toBe(esTranslations.error_combo_components_required);
+            expect(result.error).toBeUndefined();
+            expect(result.statusCode).toBe(200);
+
+            const stored = await Product.findById(combo._id);
+            expect(stored.price.toString()).toBe("30");
+            expect(await ComboDefinition.countDocuments({ product: combo._id })).toBe(0);
+            expect(await ComboComponent.countDocuments()).toBe(0);
         });
 
         it("keeps the existing definition when a combo is edited without components", async () => {
