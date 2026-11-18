@@ -2,7 +2,8 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
-import { hasRoleAtLeast, normalizeRoles } from "../../utils/roles.js";
+import { hasRoleAtLeast, normalizeRoles, roleAtLeast } from "../../utils/roles.js";
+import { resolveFirebaseUser } from "../users/user.service.js";
 import { checkRedemptionVoidWindow } from "./redemption.policy.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
@@ -17,6 +18,43 @@ const translations = {
 const getLang = (req) => {
     return req.headers['accept-language']?.split(',')[0].substring(0, 2) || req.user?.instituteLang || 'es';
 };
+
+// Mirrors order.controller.js: claim-based staff callers keep their current
+// behaviour, while every other caller gets an authoritative Mongo profile.
+const respondUserError = (res, result) => {
+    if (result.error === "missing_uid") {
+        return res.status(401).json(new ApiResponse(401, {}, "error_token_missing_uid"));
+    }
+    if (result.error === "missing_email") {
+        return res.status(400).json(new ApiResponse(400, {}, "error_user_email_required"));
+    }
+    return res.status(500).json(new ApiResponse(500, {}, "error_internal_server_generic"));
+};
+
+const resolveReadRequester = async (req, res, getModel) => {
+    if (hasRoleAtLeast(req, ROLES.SELLER)) {
+        return { isStaff: true, customerId: null };
+    }
+
+    const resolved = await resolveFirebaseUser({
+        firebaseUid: req.user?.firebaseUid,
+        email: req.user?.email,
+        name: req.user?.name,
+        getModel
+    });
+    if (resolved.error) {
+        return { errorResponse: respondUserError(res, resolved) };
+    }
+
+    return {
+        isStaff: roleAtLeast(resolved.user.role, ROLES.SELLER),
+        customerId: resolved.user._id
+    };
+};
+
+// A voucher without customerId is legacy data and belongs to nobody.
+const isVoucherOwnedBy = (voucher, customerId) =>
+    Boolean(customerId && voucher?.customerId && String(voucher.customerId) === String(customerId));
 
 const round6 = (value) => Math.round(Number(value) * 1e6) / 1e6;
 
@@ -78,6 +116,9 @@ const getComboPurchases = asyncHandler(async (req, res) => {
     const pageParam = req.params.page || req.query.page;
     const { limit = 10, status, customerPhone, code, sale, comboProduct } = req.query;
 
+    const requester = await resolveReadRequester(req, res, getModel);
+    if (requester.errorResponse) return requester.errorResponse;
+
     const filter = {};
 
     if (status !== undefined && status !== '') {
@@ -104,6 +145,10 @@ const getComboPurchases = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_combo_purchase_invalid_id", 400, translations);
         }
         filter.comboProduct = comboProduct;
+    }
+
+    if (!requester.isStaff) {
+        filter.customerId = requester.customerId;
     }
 
     try {
@@ -137,6 +182,9 @@ const getComboPurchaseById = asyncHandler(async (req, res) => {
     const getModel = getRequestModelResolver(req);
     const { comboPurchaseId } = req.params;
 
+    const requester = await resolveReadRequester(req, res, getModel);
+    if (requester.errorResponse) return requester.errorResponse;
+
     if (!comboPurchaseId || (!mongoose.Types.ObjectId.isValid(comboPurchaseId) && !CODE_PATTERN.test(comboPurchaseId))) {
         return translateErrorResponse(res, lang, "error_combo_purchase_invalid_id", 400, translations);
     }
@@ -145,6 +193,10 @@ const getComboPurchaseById = asyncHandler(async (req, res) => {
         const voucher = await resolveVoucher(comboPurchaseId, null, getModel);
 
         if (!voucher) {
+            return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
+        }
+
+        if (!requester.isStaff && !isVoucherOwnedBy(voucher, requester.customerId)) {
             return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
         }
 
@@ -170,10 +222,17 @@ const getComboPurchaseRedemptions = asyncHandler(async (req, res) => {
     const getModel = getRequestModelResolver(req);
     const { comboPurchaseId } = req.params;
 
+    const requester = await resolveReadRequester(req, res, getModel);
+    if (requester.errorResponse) return requester.errorResponse;
+
     try {
         const voucher = await resolveVoucher(comboPurchaseId, null, getModel);
 
         if (!voucher) {
+            return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
+        }
+
+        if (!requester.isStaff && !isVoucherOwnedBy(voucher, requester.customerId)) {
             return translateErrorResponse(res, lang, "error_combo_purchase_not_found", 404, translations);
         }
 
@@ -687,6 +746,12 @@ const getVoucherReconciliation = asyncHandler(async (req, res) => {
     const ComboRedemption = getModel("ComboRedemption");
     const MAX_REPORTED = 200;
     const TOLERANCE = 1e-6;
+
+    const requester = await resolveReadRequester(req, res, getModel);
+    if (requester.errorResponse) return requester.errorResponse;
+    if (!requester.isStaff) {
+        return translateErrorResponse(res, lang, "error_voucher_reconciliation_forbidden", 403, translations);
+    }
 
     try {
         // Lectura completa: el reporte no repara nada, solo detecta desvíos.

@@ -14,7 +14,8 @@ import {
     getComboPurchaseById,
     getComboPurchaseRedemptions,
     createRedemption,
-    voidRedemption
+    voidRedemption,
+    getVoucherReconciliation
 } from "./comboPurchase.controller.js";
 
 let server;
@@ -193,6 +194,239 @@ describe("combo purchase reads", () => {
         expect(payload.data).toHaveLength(1);
         expect(payload.data[0].items[0].product).toMatchObject({ name: WATER_NAME });
         expect(payload.data[0].items[0].quantity).toBe(2);
+    });
+});
+
+describe("combo purchase read ownership", () => {
+    const CLIENT_UID = "uid-combos-client";
+    const OTHER_UID = "uid-combos-other";
+    const MONGO_STAFF_UID = "uid-combos-mongo-staff";
+    const CLIENT_PHONE = "44440001";
+    const OTHER_PHONE = "44440002";
+    const OWNED_CODE = "CC000001";
+    const OTHER_CODE = "DD000002";
+    const LEGACY_CODE = "EE000003";
+
+    let clientUser;
+    let otherUser;
+    let ownedVoucher;
+    let otherVoucher;
+    let ownedRedemption;
+
+    const clientRequest = (overrides = {}) => request({
+        ...overrides,
+        user: { firebaseUid: CLIENT_UID, email: "combos-client@example.com", role: [3] }
+    });
+
+    const mongoStaffRequest = (overrides = {}) => request({
+        ...overrides,
+        user: { firebaseUid: MONGO_STAFF_UID, email: "combos-staff@example.com" }
+    });
+
+    const claimStaffRequest = (overrides = {}) => request({
+        ...overrides,
+        user: { mongoDbId: new mongoose.Types.ObjectId(), role: [2] }
+    });
+
+    const seedVoucher = (code, customerPhone, customerId) => ComboPurchase.create({
+        code,
+        comboProduct: comboProductId,
+        comboDefinition: comboDefinitionId,
+        sale: new mongoose.Types.ObjectId(),
+        customerName: "Read Owner",
+        customerPhone,
+        customerId,
+        purchasedAt: new Date("2026-11-15T10:00:00.000Z"),
+        expiresAt: null,
+        pricePaid: 20,
+        balances: [
+            {
+                product: waterProductId,
+                includedQty: 5,
+                usedQty: 0,
+                stockProduct: waterProductId,
+                conversionFactor: 1
+            }
+        ],
+        totalUnits: 5,
+        usedUnits: 0,
+        status: 0
+    });
+
+    beforeAll(async () => {
+        clientUser = await User.create({
+            email: "combos-client@example.com",
+            fullName: "Combo Client",
+            firebaseUid: CLIENT_UID,
+            role: [3],
+            status: 1
+        });
+        otherUser = await User.create({
+            email: "combos-other@example.com",
+            fullName: "Other Client",
+            firebaseUid: OTHER_UID,
+            role: [3],
+            status: 1
+        });
+        await User.create({
+            email: "combos-staff@example.com",
+            fullName: "Mongo Staff",
+            firebaseUid: MONGO_STAFF_UID,
+            role: [2],
+            status: 1
+        });
+
+        ownedVoucher = await seedVoucher(OWNED_CODE, CLIENT_PHONE, clientUser._id);
+        otherVoucher = await seedVoucher(OTHER_CODE, OTHER_PHONE, otherUser._id);
+        await seedVoucher(LEGACY_CODE, "44440003", null);
+
+        ownedRedemption = await ComboRedemption.create({
+            comboPurchase: ownedVoucher._id,
+            items: [{ product: waterProductId, quantity: 1 }],
+            operator: new mongoose.Types.ObjectId(),
+            redeemedAt: new Date("2026-11-15T11:00:00.000Z"),
+            idempotencyKey: "client-owner-read-key"
+        });
+    }, 60000);
+
+    it("limits a client list to their own vouchers", async () => {
+        const { statusCode, payload } = await call(
+            getComboPurchases,
+            clientRequest({ query: { page: "1", limit: "50" } })
+        );
+
+        expect(statusCode).toBe(200);
+        const codes = payload.data.docs.map((doc) => doc.code);
+        expect(codes).toContain(OWNED_CODE);
+        expect(codes).not.toContain(OTHER_CODE);
+        expect(codes).not.toContain(LEGACY_CODE);
+        expect(payload.data.docs.every(
+            (doc) => String(doc.customerId) === String(clientUser._id)
+        )).toBe(true);
+    });
+
+    it("does not let a client widen the list with another customer's phone or code", async () => {
+        const byPhone = await call(
+            getComboPurchases,
+            clientRequest({ query: { customerPhone: OTHER_PHONE } })
+        );
+        expect(byPhone.statusCode).toBe(200);
+        expect(byPhone.payload.data.docs).toHaveLength(0);
+
+        const byCode = await call(
+            getComboPurchases,
+            clientRequest({ query: { code: OTHER_CODE } })
+        );
+        expect(byCode.statusCode).toBe(200);
+        expect(byCode.payload.data.docs).toHaveLength(0);
+    });
+
+    it("still lets a client narrow the list by their own phone", async () => {
+        const { statusCode, payload } = await call(
+            getComboPurchases,
+            clientRequest({ query: { customerPhone: CLIENT_PHONE } })
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.data.docs.map((doc) => doc.code)).toEqual([OWNED_CODE]);
+    });
+
+    it("returns the same 404 for another customer's voucher by id and by code", async () => {
+        for (const comboPurchaseId of [String(otherVoucher._id), OTHER_CODE]) {
+            const { statusCode, payload } = await call(
+                getComboPurchaseById,
+                clientRequest({ params: { comboPurchaseId } })
+            );
+
+            expect(statusCode).toBe(404);
+            expect(payload.message).toBe("Comprobante de combo no encontrado.");
+        }
+    });
+
+    it("hides a legacy voucher without an owner from clients", async () => {
+        const { statusCode, payload } = await call(
+            getComboPurchaseById,
+            clientRequest({ params: { comboPurchaseId: LEGACY_CODE } })
+        );
+
+        expect(statusCode).toBe(404);
+        expect(payload.message).toBe("Comprobante de combo no encontrado.");
+    });
+
+    it("lets a client read their own voucher by id and by code", async () => {
+        for (const comboPurchaseId of [String(ownedVoucher._id), OWNED_CODE]) {
+            const { statusCode, payload } = await call(
+                getComboPurchaseById,
+                clientRequest({ params: { comboPurchaseId } })
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.data.code).toBe(OWNED_CODE);
+        }
+    });
+
+    it("hides another customer's redemptions by id and by code", async () => {
+        for (const comboPurchaseId of [String(otherVoucher._id), OTHER_CODE]) {
+            const { statusCode, payload } = await call(
+                getComboPurchaseRedemptions,
+                clientRequest({ params: { comboPurchaseId } })
+            );
+
+            expect(statusCode).toBe(404);
+            expect(payload.message).toBe("Comprobante de combo no encontrado.");
+        }
+    });
+
+    it("lets a client read their own redemptions", async () => {
+        const { statusCode, payload } = await call(
+            getComboPurchaseRedemptions,
+            clientRequest({ params: { comboPurchaseId: OWNED_CODE } })
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.data).toHaveLength(1);
+        expect(String(payload.data[0]._id)).toBe(String(ownedRedemption._id));
+    });
+
+    it("rejects a client without Firebase identity instead of granting staff access", async () => {
+        const { statusCode } = await call(
+            getComboPurchases,
+            request({ user: { mongoDbId: new mongoose.Types.ObjectId(), role: [3] } })
+        );
+
+        expect(statusCode).toBe(401);
+    });
+
+    it("refuses the reconciliation report for a client", async () => {
+        const { statusCode, payload } = await call(getVoucherReconciliation, clientRequest());
+
+        expect(statusCode).toBe(403);
+        expect(payload.success).toBe(false);
+    });
+
+    it("uses the Mongo role for a seller without staff claims", async () => {
+        const list = await call(
+            getComboPurchases,
+            mongoStaffRequest({ query: { customerPhone: OTHER_PHONE } })
+        );
+        expect(list.statusCode).toBe(200);
+        expect(list.payload.data.docs.map((doc) => doc.code)).toContain(OTHER_CODE);
+
+        const report = await call(getVoucherReconciliation, mongoStaffRequest());
+        expect(report.statusCode).toBe(200);
+    });
+
+    it("lets claim-based staff read any voucher and the reconciliation report", async () => {
+        const detail = await call(
+            getComboPurchaseById,
+            claimStaffRequest({ params: { comboPurchaseId: OTHER_CODE } })
+        );
+        expect(detail.statusCode).toBe(200);
+        expect(detail.payload.data.code).toBe(OTHER_CODE);
+
+        const report = await call(getVoucherReconciliation, claimStaffRequest());
+        expect(report.statusCode).toBe(200);
+        expect(report.payload.data.checked).toBeGreaterThan(0);
     });
 });
 

@@ -44,5 +44,6 @@
     "success_combo_purchases_fetched": "Comprobantes de combo obtenidos correctamente.",
     "success_combo_purchase_fetched": "Comprobante de combo obtenido correctamente.",
     "success_redemptions_fetched": "Canjes obtenidos correctamente.",
-    "success_voucher_reconciliation": "Reconciliación de vouchers obtenida correctamente."
+    "success_voucher_reconciliation": "Reconciliación de vouchers obtenida correctamente.",
+    "error_voucher_reconciliation_forbidden": "Solo el personal autorizado puede consultar la reconciliación de vouchers."
 }

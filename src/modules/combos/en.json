@@ -44,5 +44,6 @@
     "success_combo_purchases_fetched": "Combo purchases fetched successfully.",
     "success_combo_purchase_fetched": "Combo purchase fetched successfully.",
     "success_redemptions_fetched": "Redemptions fetched successfully.",
-    "success_voucher_reconciliation": "Voucher reconciliation fetched successfully."
+    "success_voucher_reconciliation": "Voucher reconciliation fetched successfully.",
+    "error_voucher_reconciliation_forbidden": "Only authorized staff can view the voucher reconciliation report."
 }
