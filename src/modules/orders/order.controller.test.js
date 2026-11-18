@@ -9,7 +9,7 @@ import { TransactionCategory } from "../transactionCategories/transactionCategor
 import { User } from "../users/user.model.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import { DB_NAME } from "../../constants.js";
-import { createOrder, updateOrderStatus, getMyOrderById } from "./order.controller.js";
+import { createOrder, updateOrderStatus, getMyOrderById, getMyOrders } from "./order.controller.js";
 
 // Confirming an order opens a Mongo transaction: this needs a replica set.
 let replSet;
@@ -96,6 +96,8 @@ describe("order tenant routing", () => {
             tenantModel("TransactionCategory").init(),
             tenantModel("ComboDefinition").init(),
             tenantModel("ComboComponent").init(),
+            tenantModel("ComboPurchase").init(),
+            tenantModel("ComboRedemption").init(),
             tenantModel("User").init()
         ]);
     }, 60000);
@@ -131,6 +133,8 @@ describe("order tenant routing", () => {
             tenantModel("TransactionCategory").deleteMany({}),
             tenantModel("ComboDefinition").deleteMany({}),
             tenantModel("ComboComponent").deleteMany({}),
+            tenantModel("ComboPurchase").deleteMany({}),
+            tenantModel("ComboRedemption").deleteMany({}),
             tenantModel("User").deleteMany({}),
             // The central database is shared by every test in this file, so
             // clear it too: the leak assertions are only meaningful if it starts
@@ -238,5 +242,296 @@ describe("order tenant routing", () => {
             })
         );
         expect(centralRead.statusCode).toBe(404);
+    });
+
+    describe("getMyOrders combo summary", () => {
+        const OTHER_UID = "uid-orders-other";
+        const OTHER_EMAIL = "other-orders@example.com";
+        const PURCHASED_AT = new Date("2026-11-16T09:00:00.000Z");
+        const REDEEMED_AT = new Date("2026-11-16T10:00:00.000Z");
+        const FORBIDDEN_KEYS = [
+            "idempotencyKey", "operator", "voidedAt", "voidedBy", "voidReason",
+            "_id", "customerId", "sale", "pricePaid", "createdBy"
+        ];
+
+        let clientUser;
+        let otherUser;
+        let componentProduct;
+        let comboProduct;
+        let comboDefinition;
+
+        const collectKeys = (value, keys = new Set()) => {
+            if (Array.isArray(value)) {
+                value.forEach((entry) => collectKeys(entry, keys));
+            } else if (value && typeof value === "object") {
+                Object.entries(value).forEach(([key, nested]) => {
+                    keys.add(key);
+                    collectKeys(nested, keys);
+                });
+            }
+            return keys;
+        };
+
+        const expectNoInternalFields = (summary) => {
+            const leaked = [...collectKeys(summary)].filter((key) => FORBIDDEN_KEYS.includes(key));
+            expect(leaked).toEqual([]);
+        };
+
+        const seedSale = () => tenantModel("Sale").create({
+            customerName: "Cliente Prueba",
+            subtotal: 20,
+            totalAmount: 20,
+            paymentMethod: 0,
+            paymentStatus: 1,
+            saleStatus: 0
+        });
+
+        const seedOrder = ({ code, customer, saleId = null }) => tenantModel("Order").create({
+            code,
+            customer,
+            customerName: "Cliente Prueba",
+            customerPhone: "71234567",
+            customerEmail: "client@example.com",
+            deliveryType: 1,
+            pickupAt: new Date(Date.now() + 60 * 60 * 1000),
+            items: [{
+                product: tenantProduct._id,
+                name: tenantProduct.name,
+                unitPrice: mongoose.Types.Decimal128.fromString("20.00"),
+                quantity: 1,
+                subtotal: mongoose.Types.Decimal128.fromString("20.00")
+            }],
+            total: mongoose.Types.Decimal128.fromString("20.00"),
+            status: 1,
+            saleId
+        });
+
+        const seedVoucher = ({
+            code,
+            sale,
+            customerId,
+            totalUnits,
+            usedUnits,
+            status = 0,
+            purchasedAt = PURCHASED_AT
+        }) => tenantModel("ComboPurchase").create({
+            code,
+            comboProduct: comboProduct._id,
+            comboDefinition: comboDefinition._id,
+            sale,
+            customerName: "Combo Client",
+            customerPhone: "71234567",
+            customerId,
+            purchasedAt,
+            expiresAt: null,
+            pricePaid: 20,
+            balances: [{
+                product: componentProduct._id,
+                includedQty: totalUnits,
+                usedQty: usedUnits,
+                stockProduct: componentProduct._id,
+                conversionFactor: 1
+            }],
+            totalUnits,
+            usedUnits,
+            status
+        });
+
+        const seedRedemption = ({
+            comboPurchase,
+            notes,
+            redeemedAt = REDEEMED_AT,
+            voidedAt = null
+        }) => tenantModel("ComboRedemption").create({
+            comboPurchase,
+            items: [{ product: componentProduct._id, quantity: 1 }],
+            operator: new mongoose.Types.ObjectId(),
+            redeemedAt,
+            idempotencyKey: new mongoose.Types.ObjectId().toString(),
+            notes,
+            voidedAt,
+            voidedBy: voidedAt ? new mongoose.Types.ObjectId() : null,
+            voidReason: voidedAt ? "Customer returned the product" : ""
+        });
+
+        const readOrders = async () => {
+            const { statusCode, payload } = await call(getMyOrders, clientRequest());
+            expect(statusCode).toBe(200);
+            return payload.data;
+        };
+
+        beforeEach(async () => {
+            clientUser = await tenantModel("User").findOne({ firebaseUid: "uid-client" });
+            otherUser = await tenantModel("User").create({
+                email: OTHER_EMAIL,
+                fullName: "Other Client",
+                firebaseUid: OTHER_UID,
+                role: CLIENT,
+                status: 1
+            });
+
+            componentProduct = await tenantModel("Product").create({
+                name: "Combo Bottled Water",
+                productType: 2,
+                isSellable: true,
+                price: 5,
+                unit: new mongoose.Types.ObjectId(),
+                stock: 10
+            });
+            comboProduct = await tenantModel("Product").create({
+                name: "Order Combo",
+                productType: 3,
+                isSellable: true,
+                price: 20,
+                unit: componentProduct.unit,
+                stock: 0
+            });
+            comboDefinition = await tenantModel("ComboDefinition").create({
+                product: comboProduct._id,
+                referencePrice: 20,
+                validityDays: 0,
+                status: 1
+            });
+        });
+
+        itDb("returns summed combo progress without internal fields", async () => {
+            const sale = await seedSale();
+            const order = await seedOrder({
+                code: "PED-COMBO1",
+                customer: clientUser._id,
+                saleId: sale._id
+            });
+            const first = await seedVoucher({
+                code: "CB000001",
+                sale: sale._id,
+                customerId: clientUser._id,
+                totalUnits: 5,
+                usedUnits: 2
+            });
+            await seedVoucher({
+                code: "CB000002",
+                sale: sale._id,
+                customerId: clientUser._id,
+                totalUnits: 3,
+                usedUnits: 1,
+                status: 1,
+                purchasedAt: new Date("2026-11-16T09:01:00.000Z")
+            });
+            await seedRedemption({ comboPurchase: first._id, notes: "  Entrega parcial  " });
+
+            const dtos = await readOrders();
+            const summary = dtos.find((dto) => dto.id === String(order._id))?.comboSummary;
+
+            expect(summary).toEqual({
+                totalUnits: 8,
+                usedUnits: 3,
+                vouchers: [
+                    {
+                        code: "CB000001",
+                        status: 0,
+                        totalUnits: 5,
+                        usedUnits: 2,
+                        redemptions: [{
+                            redeemedAt: REDEEMED_AT.toISOString(),
+                            notes: "Entrega parcial",
+                            items: [{ productName: "Combo Bottled Water", quantity: 1 }]
+                        }]
+                    },
+                    {
+                        code: "CB000002",
+                        status: 1,
+                        totalUnits: 3,
+                        usedUnits: 1,
+                        redemptions: []
+                    }
+                ]
+            });
+            expectNoInternalFields(summary);
+        });
+
+        itDb("ignores a voucher owned by another customer for the same sale", async () => {
+            const sale = await seedSale();
+            const order = await seedOrder({
+                code: "PED-COMBO2",
+                customer: clientUser._id,
+                saleId: sale._id
+            });
+            await seedVoucher({
+                code: "CB000010",
+                sale: sale._id,
+                customerId: clientUser._id,
+                totalUnits: 4,
+                usedUnits: 1
+            });
+            await seedVoucher({
+                code: "CB000011",
+                sale: sale._id,
+                customerId: otherUser._id,
+                totalUnits: 9,
+                usedUnits: 7
+            });
+
+            const dtos = await readOrders();
+            const summary = dtos.find((dto) => dto.id === String(order._id)).comboSummary;
+
+            expect(summary.totalUnits).toBe(4);
+            expect(summary.usedUnits).toBe(1);
+            expect(summary.vouchers.map((voucher) => voucher.code)).toEqual(["CB000010"]);
+            expect(JSON.stringify(summary)).not.toContain("CB000011");
+        });
+
+        itDb("omits comboSummary for orders without vouchers", async () => {
+            const saleWithoutVouchers = await seedSale();
+            const comboOrder = await seedOrder({
+                code: "PED-COMBO3",
+                customer: clientUser._id,
+                saleId: saleWithoutVouchers._id
+            });
+            const plainOrder = await seedOrder({
+                code: "PED-PLAIN3",
+                customer: clientUser._id
+            });
+
+            const dtos = await readOrders();
+            const byId = new Map(dtos.map((dto) => [dto.id, dto]));
+
+            expect(byId.get(String(comboOrder._id))).not.toHaveProperty("comboSummary");
+            expect(byId.get(String(plainOrder._id))).not.toHaveProperty("comboSummary");
+        });
+
+        itDb("excludes voided redemptions from the history", async () => {
+            const sale = await seedSale();
+            const order = await seedOrder({
+                code: "PED-COMBO4",
+                customer: clientUser._id,
+                saleId: sale._id
+            });
+            const voucher = await seedVoucher({
+                code: "CB000020",
+                sale: sale._id,
+                customerId: clientUser._id,
+                totalUnits: 5,
+                usedUnits: 1
+            });
+            await seedRedemption({ comboPurchase: voucher._id, notes: "Entrega vigente" });
+            await seedRedemption({
+                comboPurchase: voucher._id,
+                notes: "Canje anulado",
+                redeemedAt: new Date("2026-11-16T12:00:00.000Z"),
+                voidedAt: new Date("2026-11-16T13:00:00.000Z")
+            });
+
+            const dtos = await readOrders();
+            const summary = dtos.find((dto) => dto.id === String(order._id)).comboSummary;
+
+            expect(summary.usedUnits).toBe(1);
+            expect(summary.vouchers[0].redemptions).toEqual([{
+                redeemedAt: REDEEMED_AT.toISOString(),
+                notes: "Entrega vigente",
+                items: [{ productName: "Combo Bottled Water", quantity: 1 }]
+            }]);
+            expect(JSON.stringify(summary)).not.toContain("Canje anulado");
+            expectNoInternalFields(summary);
+        });
     });
 });

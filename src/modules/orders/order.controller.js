@@ -26,7 +26,7 @@ const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 const toDecimal = (value) => mongoose.Types.Decimal128.fromString(round2(value).toFixed(2));
 
-const toOrderDto = (order) => ({
+const toOrderDto = (order, comboSummary) => ({
   id: String(order._id),
   code: order.code,
   status: order.status,
@@ -46,6 +46,7 @@ const toOrderDto = (order) => ({
   })),
   total: toNumber(order.total),
   createdAt: order.createdAt,
+  ...(comboSummary ? { comboSummary } : {}),
 });
 
 const respondUserError = (res, result) => {
@@ -305,7 +306,66 @@ const getMyOrders = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(50);
 
-  return res.status(200).json(new ApiResponse(200, orders.map(toOrderDto), "success_orders_fetched"));
+  // At most two extra reads for the whole page: one for the vouchers of these
+  // sales, one for their live redemptions. The customerId filter is the
+  // security boundary, even though the orders themselves are owner-scoped.
+  const saleIds = orders.map((order) => order.saleId).filter(Boolean);
+  const vouchers = saleIds.length === 0
+    ? []
+    : await getModel("ComboPurchase")
+        .find({ sale: { $in: saleIds }, customerId: resolved.user._id })
+        .select("sale code status totalUnits usedUnits")
+        .sort({ purchasedAt: 1 });
+
+  const voucherIds = vouchers.map((voucher) => voucher._id);
+  // Voided rows are omitted: usedUnits already excludes them.
+  const redemptions = voucherIds.length === 0
+    ? []
+    : await getModel("ComboRedemption")
+        .find({ comboPurchase: { $in: voucherIds }, voidedAt: null })
+        .select("comboPurchase redeemedAt notes items")
+        .populate("items.product", "name")
+        .sort({ redeemedAt: 1 })
+        .lean();
+
+  const redemptionsByVoucher = new Map();
+  for (const redemption of redemptions) {
+    const key = String(redemption.comboPurchase);
+    if (!redemptionsByVoucher.has(key)) redemptionsByVoucher.set(key, []);
+
+    const redeemedAtDate = new Date(redemption.redeemedAt);
+    redemptionsByVoucher.get(key).push({
+      redeemedAt: Number.isNaN(redeemedAtDate.getTime()) ? '' : redeemedAtDate.toISOString(),
+      notes: typeof redemption.notes === "string" ? redemption.notes.trim() : '',
+      items: (redemption.items || []).map((item) => ({
+        productName: item.product?.name || '',
+        quantity: toNumber(item.quantity),
+      })),
+    });
+  }
+
+  const dtos = orders.map((order) => {
+    const orderVouchers = vouchers.filter(
+      (voucher) => String(voucher.sale) === String(order.saleId)
+    );
+    if (orderVouchers.length === 0) return toOrderDto(order);
+
+    const comboSummary = {
+      totalUnits: orderVouchers.reduce((sum, voucher) => sum + toNumber(voucher.totalUnits), 0),
+      usedUnits: orderVouchers.reduce((sum, voucher) => sum + toNumber(voucher.usedUnits), 0),
+      vouchers: orderVouchers.map((voucher) => ({
+        code: voucher.code,
+        status: voucher.status,
+        totalUnits: toNumber(voucher.totalUnits),
+        usedUnits: toNumber(voucher.usedUnits),
+        redemptions: redemptionsByVoucher.get(String(voucher._id)) || [],
+      })),
+    };
+
+    return toOrderDto(order, comboSummary);
+  });
+
+  return res.status(200).json(new ApiResponse(200, dtos, "success_orders_fetched"));
 });
 
 const getMyOrderById = asyncHandler(async (req, res) => {
