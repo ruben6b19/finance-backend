@@ -116,6 +116,12 @@ const createOrder = asyncHandler(async (req, res) => {
     .filter((product) => product.productType === COMBO_PRODUCT_TYPE)
     .map((product) => product._id);
 
+  // Each combo unit issues its own voucher with an independent expiry and
+  // redemption cycle, so combos must be ordered one unit at a time.
+  if (comboProductIds.some((productId) => quantities.get(String(productId)) !== 1)) {
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_items"));
+  }
+
   if (comboProductIds.length > 0) {
     const definitions = await ComboDefinition.find({
       product: { $in: comboProductIds },

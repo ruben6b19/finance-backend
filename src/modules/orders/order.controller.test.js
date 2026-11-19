@@ -244,6 +244,71 @@ describe("order tenant routing", () => {
         expect(centralRead.statusCode).toBe(404);
     });
 
+    // A genuinely vouchered combo: an active definition with a component, so
+    // createOrder passes its availability check and reaches the quantity guard.
+    const seedOrderableCombo = async () => {
+        const component = await tenantModel("Product").create({
+            name: "Combo Component",
+            productType: 2,
+            isSellable: true,
+            price: 5,
+            unit: new mongoose.Types.ObjectId(),
+            stock: 10
+        });
+        const combo = await tenantModel("Product").create({
+            name: "Orderable Combo",
+            productType: 3,
+            isSellable: true,
+            price: 20,
+            unit: component.unit,
+            stock: 0
+        });
+        const definition = await tenantModel("ComboDefinition").create({
+            product: combo._id,
+            referencePrice: 20,
+            validityDays: 0,
+            status: 1
+        });
+        await tenantModel("ComboComponent").create({
+            combo: definition._id,
+            product: component._id,
+            quantity: 1,
+            stockProduct: component._id,
+            conversionFactor: 1
+        });
+        return combo;
+    };
+
+    const comboOrderBody = (combo, quantity) => ({
+        ...orderBody(),
+        items: [{ productId: String(combo._id), quantity }]
+    });
+
+    itDb("rejects more than one unit of a combo", async () => {
+        const combo = await seedOrderableCombo();
+
+        const { statusCode, payload } = await call(
+            createOrder,
+            clientRequest({ body: comboOrderBody(combo, 2) })
+        );
+
+        expect(statusCode).toBe(400);
+        expect(payload.message).toBe("error_order_invalid_items");
+        expect(await tenantModel("Order").countDocuments()).toBe(0);
+    });
+
+    itDb("accepts a single unit of a combo", async () => {
+        const combo = await seedOrderableCombo();
+
+        const { statusCode } = await call(
+            createOrder,
+            clientRequest({ body: comboOrderBody(combo, 1) })
+        );
+
+        expect(statusCode).toBe(201);
+        expect(await tenantModel("Order").countDocuments()).toBe(1);
+    });
+
     describe("getMyOrders combo summary", () => {
         const OTHER_UID = "uid-orders-other";
         const OTHER_EMAIL = "other-orders@example.com";
