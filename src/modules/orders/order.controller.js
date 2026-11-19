@@ -8,6 +8,7 @@ import { resolveFirebaseUser } from "../users/user.service.js";
 import { ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord, resolveSaleStockItems } from "../sales/sale.service.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
+import { enqueueOrderStatusMail } from "../notifications/outbox.service.js";
 
 const COMBO_PRODUCT_TYPE = 3;
 const PUBLIC_PRODUCT_TYPES = [1, 2, COMBO_PRODUCT_TYPE];
@@ -23,6 +24,9 @@ const toNumber = (value) => {
 };
 
 const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const getLang = (req) =>
+    req.headers?.['accept-language']?.split(',')[0].substring(0, 2) || 'es';
 
 const toDecimal = (value) => mongoose.Types.Decimal128.fromString(round2(value).toFixed(2));
 
@@ -493,6 +497,17 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     if (!updated) {
       return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
     }
+
+    // No transaction exists on the reject path, so the outbox row is written
+    // on its own. A failure here never changes the order response.
+    try {
+      await enqueueOrderStatusMail({
+        getModel, order: updated, status: 2, lang: getLang(req)
+      });
+    } catch (error) {
+      console.error("[outbox] failed to enqueue rejection mail", error);
+    }
+
     return res.status(200).json(new ApiResponse(200, toOrderDto(updated), "success_order_cancelled"));
   }
 
@@ -544,6 +559,18 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     // huérfano y solo se puede rastrear por el texto de las notas.
     updatedOrder.saleId = sale._id;
     await updatedOrder.save({ session });
+
+    // Enqueue inside the transaction so the mail row commits atomically with
+    // the order and sale. The failure is only logged: mail must never abort a
+    // confirmed order or roll back its writes.
+    try {
+      await enqueueOrderStatusMail({
+        getModel, session, order: updatedOrder, status: 1,
+        comboVouchers: sale?.comboVouchers, lang: getLang(req)
+      });
+    } catch (error) {
+      console.error("[outbox] failed to enqueue confirmation mail", error);
+    }
 
     await session.commitTransaction();
     session.endSession();

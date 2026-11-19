@@ -13,6 +13,7 @@
     "create:superadmin": "node scripts/create-superadmin.js",
     "create:store-superadmin": "node scripts/create-store-superadmin.js",
     "expire:stale": "node scripts/expire-stale.js",
+    "mail:outbox": "node scripts/send-mail-outbox.js",
     "provision:store": "node scripts/provision-store.js",
     "seed:reference": "node scripts/copy-reference-data.js",
     "reference:export": "node scripts/copy-reference-data.js --export data/reference-data.json",
@@ -54,7 +55,8 @@
     "mongoose": "^9.7.4",
     "mongoose-aggregate-paginate-v2": "^1.1.4",
     "mongoose-paginate-v2": "^1.9.5",
-    "multer": "^2.2.0"
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.3"
   },
   "overrides": {
     "jose": "4.15.5"

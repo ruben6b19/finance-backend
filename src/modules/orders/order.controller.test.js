@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
@@ -9,7 +10,19 @@ import { TransactionCategory } from "../transactionCategories/transactionCategor
 import { User } from "../users/user.model.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import { DB_NAME } from "../../constants.js";
-import { createOrder, updateOrderStatus, getMyOrderById, getMyOrders } from "./order.controller.js";
+
+// The outbox service is mocked so order tests never touch SMTP or write mail
+// rows. The controller must be imported only after this registration.
+const mockEnqueueOrderStatusMail = jest.fn();
+
+jest.unstable_mockModule("../notifications/outbox.service.js", () => ({
+    enqueueOrderStatusMail: mockEnqueueOrderStatusMail
+}));
+
+let createOrder;
+let updateOrderStatus;
+let getMyOrderById;
+let getMyOrders;
 
 // Confirming an order opens a Mongo transaction: this needs a replica set.
 let replSet;
@@ -54,6 +67,9 @@ const request = (overrides = {}) => ({
 });
 
 beforeAll(async () => {
+    ({ createOrder, updateOrderStatus, getMyOrderById, getMyOrders } =
+        await import("./order.controller.js"));
+
     // A single-node in-memory replica set loses the transaction lock at 5 ms
     // by default under sequential load. Harness limitation, not app behaviour.
     replSet = await MongoMemoryReplSet.create({
@@ -85,6 +101,13 @@ afterAll(async () => {
 describe("order tenant routing", () => {
     const tenantModel = (name) => getTenantModel(TENANT_DB, name);
 
+    beforeEach(() => {
+        mockEnqueueOrderStatusMail.mockReset().mockResolvedValue({
+            enqueued: true,
+            id: new mongoose.Types.ObjectId()
+        });
+    });
+
     beforeAll(async () => {
         // Creating collections inside a transaction races for the catalog lock
         // in a single-node replica set, so create them up front.
@@ -98,7 +121,8 @@ describe("order tenant routing", () => {
             tenantModel("ComboComponent").init(),
             tenantModel("ComboPurchase").init(),
             tenantModel("ComboRedemption").init(),
-            tenantModel("User").init()
+            tenantModel("User").init(),
+            tenantModel("MailOutbox").init()
         ]);
     }, 60000);
 
@@ -307,6 +331,87 @@ describe("order tenant routing", () => {
 
         expect(statusCode).toBe(201);
         expect(await tenantModel("Order").countDocuments()).toBe(1);
+    });
+
+    itDb("enqueues one confirmation mail with voucher codes for a combo order", async () => {
+        const combo = await seedOrderableCombo();
+        const created = await call(
+            createOrder,
+            clientRequest({ body: comboOrderBody(combo, 1) })
+        );
+        const orderId = created.payload.data.id;
+
+        const { statusCode, payload } = await call(
+            updateOrderStatus,
+            staffRequest({ params: { orderId }, body: { status: 1 } })
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.message).toBe("success_order_confirmed");
+        expect(mockEnqueueOrderStatusMail).toHaveBeenCalledTimes(1);
+
+        const callArgs = mockEnqueueOrderStatusMail.mock.calls[0][0];
+        expect(callArgs.status).toBe(1);
+        expect(callArgs.order.code).toBe(created.payload.data.code);
+        expect(callArgs.lang).toBe("es");
+        expect(callArgs.comboVouchers).toHaveLength(1);
+        expect(callArgs.comboVouchers[0].code).toEqual(expect.any(String));
+        expect(callArgs.session).toBeTruthy();
+    });
+
+    itDb("enqueues one rejection mail when an order is cancelled", async () => {
+        const created = await call(createOrder, clientRequest({ body: orderBody() }));
+        const orderId = created.payload.data.id;
+
+        const { statusCode, payload } = await call(
+            updateOrderStatus,
+            staffRequest({
+                params: { orderId },
+                body: { status: 2 },
+                headers: { "accept-language": "en-US,en;q=0.9" }
+            })
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.message).toBe("success_order_cancelled");
+        expect(mockEnqueueOrderStatusMail).toHaveBeenCalledTimes(1);
+
+        const callArgs = mockEnqueueOrderStatusMail.mock.calls[0][0];
+        expect(callArgs.status).toBe(2);
+        expect(callArgs.order.code).toBe(created.payload.data.code);
+        expect(callArgs.lang).toBe("en");
+        expect(callArgs.comboVouchers).toBeUndefined();
+        expect(callArgs.session).toBeUndefined();
+    });
+
+    itDb("keeps the response and writes unchanged when the outbox service throws", async () => {
+        const created = await call(createOrder, clientRequest({ body: orderBody() }));
+        const orderId = created.payload.data.id;
+        mockEnqueueOrderStatusMail.mockRejectedValueOnce(new Error("Outbox unavailable"));
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+        let response;
+        try {
+            response = await call(
+                updateOrderStatus,
+                staffRequest({ params: { orderId }, body: { status: 1 } })
+            );
+        } finally {
+            errorSpy.mockRestore();
+        }
+
+        expect(response.statusCode).toBe(200);
+        expect(response.payload.message).toBe("success_order_confirmed");
+        expect(response.payload.data.status).toBe(1);
+        expect(mockEnqueueOrderStatusMail).toHaveBeenCalledTimes(1);
+
+        expect(await tenantModel("Sale").countDocuments()).toBe(1);
+        expect(await tenantModel("Transaction").countDocuments()).toBe(1);
+        expect(await tenantModel("Order").countDocuments()).toBe(1);
+        const tenantOrder = await tenantModel("Order").findById(orderId);
+        expect(tenantOrder.status).toBe(1);
+        expect(tenantOrder.saleId).toBeTruthy();
+        expect((await tenantModel("Product").findById(tenantProduct._id)).stock).toBe(8);
     });
 
     describe("getMyOrders combo summary", () => {

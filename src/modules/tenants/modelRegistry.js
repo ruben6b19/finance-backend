@@ -14,6 +14,7 @@ import { ComboRedemption } from "../combos/comboRedemption.model.js";
 import { ComboPurchase } from "../combos/comboPurchase.model.js";
 import { ComboComponent } from "../combos/comboComponent.model.js";
 import { ComboDefinition } from "../combos/comboDefinition.model.js";
+import { MailOutbox } from "../notifications/mailOutbox.model.js";
 
 // TenantMapping is intentionally excluded: it lives in the central database
 // and must never be routed to a tenant connection.
@@ -33,7 +34,8 @@ const MODELS = [
     ComboRedemption,
     ComboPurchase,
     ComboComponent,
-    ComboDefinition
+    ComboDefinition,
+    MailOutbox
 ];
 
 export const TENANT_MODEL_SCHEMAS = new Map(
