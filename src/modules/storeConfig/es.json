@@ -2,6 +2,9 @@
     "error_store_config_not_found": "La configuración de la tienda todavía no fue aprovisionada.",
     "success_store_config_fetched": "Configuración de la tienda obtenida exitosamente.",
     "success_store_name_fetched": "Nombre de la tienda obtenido exitosamente.",
+    "error_store_config_admin_only": "Solo los administradores pueden modificar la configuración de correo.",
+    "error_store_config_invalid_mail": "Los datos de correo son inválidos. Verifique el usuario, la contraseña y el correo de copia.",
+    "success_store_mail_config_saved": "Configuración de correo guardada exitosamente.",
 
     "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
 }

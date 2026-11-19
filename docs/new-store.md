@@ -17,9 +17,30 @@ The `.env` at the repository root must define:
 | `MONGODB_URI` | Atlas connection string, without the database name |
 | `DB_NAME` | Central database, `financeDB` |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | Base64 service account JSON, used to create Firebase users |
+| `MAIL_ENCRYPTION_KEY` | Passphrase used to derive the AES-256-GCM key that encrypts each store's SMTP password |
+
+`DB_NAME` is currently hardcoded to `financeDB` in `src/constants.js`; the table
+keeps the documented name for compatibility with older runbooks.
 
 The Atlas cluster itself must already exist. MongoDB has no `CREATE DATABASE`:
 a database starts existing when it holds a collection.
+
+### Mail notifications
+
+Each store keeps its own SMTP credentials in its `StoreConfig` document. Once
+the store is provisioned, an ADMIN saves them with:
+
+```
+PUT /api/v1/store-config/mail
+{ "smtpUser": "store@gmail.com", "smtpPassword": "gmail-app-password", "adminBccEmail": "owner@gmail.com" }
+```
+
+The password is encrypted with `MAIL_ENCRYPTION_KEY` and never returned by any
+API. A Gmail account needs an **App Password**, not the regular account
+password. Rotating `MAIL_ENCRYPTION_KEY` makes every stored password
+undecryptable, so all stores must re-save their credentials afterwards. If a
+store has not configured mail, order confirmations and rejections simply skip
+the email and log a warning — the order flow is never blocked.
 
 ---
 

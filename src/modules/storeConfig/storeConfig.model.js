@@ -56,6 +56,21 @@ const storeConfigSchema = new Schema(
             type: String,
             trim: true,
             default: ""
+        },
+        smtpUser: {
+            type: String,
+            default: "",
+            trim: true
+        },
+        smtpPassEncrypted: {
+            type: String,
+            default: "",
+            select: false
+        },
+        adminBccEmail: {
+            type: String,
+            default: "",
+            trim: true
         }
     },
     {

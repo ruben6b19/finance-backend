@@ -5,6 +5,11 @@ import { getRequestModel } from "../tenants/requestModel.js";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import { ROLES } from "../../constants/roles.js";
+import { hasRoleAtLeast } from "../../utils/roles.js";
+import { encrypt } from "../../utils/mailCrypto.js";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const translations = {
     es: esTranslations,
@@ -72,4 +77,63 @@ const getStoreConfig = asyncHandler(async (req, res) => {
     }
 });
 
-export { getStoreConfig, getPublicStoreConfig };
+/**
+ * Stores the SMTP credentials of the request tenant. The password is encrypted
+ * before it reaches the database and is never included in the response.
+ */
+const updateMailConfig = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const StoreConfig = getRequestModel(req, "StoreConfig");
+
+    try {
+        if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+            return translateErrorResponse(res, lang, "error_store_config_admin_only", 403, translations);
+        }
+
+        const { smtpUser, smtpPassword, adminBccEmail } = req.body || {};
+        const trimmedUser = typeof smtpUser === "string" ? smtpUser.trim() : "";
+        const trimmedBcc = typeof adminBccEmail === "string" ? adminBccEmail.trim() : "";
+        const hasPassword = typeof smtpPassword === "string" && smtpPassword.length > 0;
+
+        if (!trimmedUser || !hasPassword || !EMAIL_PATTERN.test(trimmedBcc)) {
+            return translateErrorResponse(res, lang, "error_store_config_invalid_mail", 400, translations);
+        }
+
+        let encryptedPassword;
+        try {
+            encryptedPassword = encrypt(smtpPassword);
+        } catch (error) {
+            console.error("Error encrypting the store mail password:", error);
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+        }
+
+        const config = await StoreConfig.findOneAndUpdate(
+            { key: STORE_CONFIG_KEY },
+            {
+                $set: {
+                    smtpUser: trimmedUser,
+                    smtpPassEncrypted: encryptedPassword,
+                    adminBccEmail: trimmedBcc
+                }
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!config) {
+            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                { smtpUser: config.smtpUser, adminBccEmail: config.adminBccEmail },
+                translations[lang]?.success_store_mail_config_saved || "success_store_mail_config_saved"
+            )
+        );
+    } catch (error) {
+        console.error("Error updating store mail config:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
+export { getStoreConfig, getPublicStoreConfig, updateMailConfig };

@@ -3,8 +3,10 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 
 import { DB_NAME } from "../../constants.js";
 import { StoreConfig, STORE_CONFIG_KEY } from "./storeConfig.model.js";
-import { getPublicStoreConfig, getStoreConfig } from "./storeConfig.controller.js";
+import { getPublicStoreConfig, getStoreConfig, updateMailConfig } from "./storeConfig.controller.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
+import { ROLES } from "../../constants/roles.js";
+import { decrypt } from "../../utils/mailCrypto.js";
 import esTranslations from "./es.json" with { type: "json" };
 
 const TENANT_DB = "tenant_store_config";
@@ -28,15 +30,36 @@ const call = (handler, req) =>
     });
 
 // Mirrors the shape verifyFirebaseToken attaches to the request.
-const requestFor = (dbName) => ({
+const requestFor = (dbName, role, body) => ({
     headers: {},
+    ...(role === undefined ? {} : { user: { role: [role] } }),
+    ...(body === undefined ? {} : { body }),
     tenant: {
         getModel: (modelName) => getTenantModel(dbName, modelName)
     }
 });
 
+const validMailBody = {
+    smtpUser: "sender@tenant.test",
+    smtpPassword: "s3cret-password",
+    adminBccEmail: "admin@tenant.test"
+};
+
 describe("storeConfig module", () => {
     let mongoServer;
+    const originalMailKey = process.env.MAIL_ENCRYPTION_KEY;
+
+    beforeAll(() => {
+        process.env.MAIL_ENCRYPTION_KEY = "test-store-config-mail-key";
+    });
+
+    afterAll(() => {
+        if (originalMailKey === undefined) {
+            delete process.env.MAIL_ENCRYPTION_KEY;
+        } else {
+            process.env.MAIL_ENCRYPTION_KEY = originalMailKey;
+        }
+    });
 
     beforeAll(async () => {
         mongoServer = await MongoMemoryServer.create();
@@ -184,5 +207,96 @@ describe("storeConfig module", () => {
         await expect(call(getStoreConfig, { headers: {} })).rejects.toMatchObject({
             statusCode: 500
         });
+    });
+
+    it("lets an ADMIN save mail credentials encrypted without exposing them", async () => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create({ name: "Tienda del Tenant" });
+
+        const { statusCode, payload } = await call(
+            updateMailConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, {
+                smtpUser: "  sender@tenant.test  ",
+                smtpPassword: "s3cret-password",
+                adminBccEmail: "  admin@tenant.test  "
+            })
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.success).toBe(true);
+        expect(payload.message).toBe(esTranslations.success_store_mail_config_saved);
+        expect(payload.data).toEqual({
+            smtpUser: "sender@tenant.test",
+            adminBccEmail: "admin@tenant.test"
+        });
+        expect(JSON.stringify(payload)).not.toContain("smtpPassEncrypted");
+        expect(JSON.stringify(payload)).not.toContain("s3cret-password");
+
+        const defaultDoc = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
+        expect(defaultDoc.smtpPassEncrypted).toBeUndefined();
+
+        const stored = await tenantModel
+            .findOne({ key: STORE_CONFIG_KEY })
+            .select("+smtpPassEncrypted")
+            .lean();
+        expect(stored.smtpPassEncrypted).toBeTruthy();
+        expect(stored.smtpPassEncrypted).not.toBe("s3cret-password");
+        expect(decrypt(stored.smtpPassEncrypted)).toBe("s3cret-password");
+    });
+
+    it.each([
+        ["CLIENT", ROLES.CLIENT],
+        ["SELLER", ROLES.SELLER]
+    ])("returns 403 when a %s tries to save mail credentials", async (_, role) => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create({ name: "Tienda del Tenant" });
+
+        const { statusCode, payload } = await call(
+            updateMailConfig,
+            requestFor(TENANT_DB, role, validMailBody)
+        );
+
+        expect(statusCode).toBe(403);
+        expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
+        const stored = await tenantModel
+            .findOne({ key: STORE_CONFIG_KEY })
+            .select("+smtpPassEncrypted")
+            .lean();
+        expect(stored.smtpPassEncrypted).toBe("");
+    });
+
+    it.each([
+        [
+            "smtpUser is empty",
+            { ...validMailBody, smtpUser: "" }
+        ],
+        [
+            "smtpPassword is empty",
+            { ...validMailBody, smtpPassword: "" }
+        ],
+        [
+            "adminBccEmail is not an email",
+            { ...validMailBody, adminBccEmail: "not-an-email" }
+        ]
+    ])("returns 400 when %s", async (_, body) => {
+        await getTenantModel(TENANT_DB, "StoreConfig").create({ name: "Tienda del Tenant" });
+
+        const { statusCode, payload } = await call(
+            updateMailConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, body)
+        );
+
+        expect(statusCode).toBe(400);
+        expect(payload.message).toBe(esTranslations.error_store_config_invalid_mail);
+    });
+
+    it("returns 404 when the tenant has no store config", async () => {
+        const { statusCode, payload } = await call(
+            updateMailConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, validMailBody)
+        );
+
+        expect(statusCode).toBe(404);
+        expect(payload.message).toBe(esTranslations.error_store_config_not_found);
     });
 });

@@ -2,6 +2,9 @@
     "error_store_config_not_found": "The store configuration has not been provisioned yet.",
     "success_store_config_fetched": "Store configuration fetched successfully.",
     "success_store_name_fetched": "Store name fetched successfully.",
+    "error_store_config_admin_only": "Only administrators can update the mail configuration.",
+    "error_store_config_invalid_mail": "Invalid mail settings. Check the user, password and BCC email address.",
+    "success_store_mail_config_saved": "Mail configuration saved successfully.",
 
     "error_internal_server_generic": "An unexpected server error occurred."
 }

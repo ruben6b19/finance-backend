@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getPublicStoreConfig, getStoreConfig } from "./storeConfig.controller.js";
+import { getPublicStoreConfig, getStoreConfig, updateMailConfig } from "./storeConfig.controller.js";
 import { verifyFirebaseToken } from "../../middlewares/auth.middleware.js";
 import { requireStore } from "../../middlewares/resolveStore.middleware.js";
 
@@ -14,5 +14,9 @@ router.route("/public").get(requireStore, getPublicStoreConfig);
 router.use(verifyFirebaseToken);
 
 router.route("/").get(getStoreConfig);
+
+// SMTP credentials are tenant-scoped and admin-only; the role guard lives in
+// the controller so the route itself only enforces authentication.
+router.route("/mail").put(updateMailConfig);
 
 export default router;
