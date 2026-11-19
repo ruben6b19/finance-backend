@@ -119,7 +119,7 @@ const createOrder = asyncHandler(async (req, res) => {
   // Each combo unit issues its own voucher with an independent expiry and
   // redemption cycle, so combos must be ordered one unit at a time.
   if (comboProductIds.some((productId) => quantities.get(String(productId)) !== 1)) {
-    return res.status(400).json(new ApiResponse(400, {}, "error_order_invalid_items"));
+    return res.status(400).json(new ApiResponse(400, {}, "error_order_combo_single_unit"));
   }
 
   if (comboProductIds.length > 0) {

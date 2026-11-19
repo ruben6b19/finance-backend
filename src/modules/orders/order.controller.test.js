@@ -293,7 +293,7 @@ describe("order tenant routing", () => {
         );
 
         expect(statusCode).toBe(400);
-        expect(payload.message).toBe("error_order_invalid_items");
+        expect(payload.message).toBe("error_order_combo_single_unit");
         expect(await tenantModel("Order").countDocuments()).toBe(0);
     });
 
