@@ -11,6 +11,8 @@
     "success_store_coordinates_saved": "Coordenadas de la tienda guardadas.",
     "error_store_config_invalid_timezone": "La zona horaria debe ser un nombre IANA válido (por ejemplo America/La_Paz).",
     "success_store_timezone_saved": "Zona horaria de la tienda guardada.",
+    "error_store_config_invalid_general_data": "Los datos generales de la tienda son inválidos. El nombre es obligatorio y todos los campos deben ser texto.",
+    "success_store_general_data_saved": "Datos generales de la tienda guardados.",
 
     "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
 }

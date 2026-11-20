@@ -3,7 +3,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 
 import { DB_NAME } from "../../constants.js";
 import { StoreConfig, STORE_CONFIG_KEY } from "./storeConfig.model.js";
-import { getPublicStoreConfig, getStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateMailConfig } from "./storeConfig.controller.js";
+import { getPublicStoreConfig, getStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateGeneralStoreConfig, updateMailConfig } from "./storeConfig.controller.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import { ROLES } from "../../constants/roles.js";
 import { decrypt } from "../../utils/mailCrypto.js";
@@ -43,6 +43,55 @@ const validMailBody = {
     smtpUser: "sender@tenant.test",
     smtpPassword: "s3cret-password",
     adminBccEmail: "admin@tenant.test"
+};
+
+// Surrounding whitespace proves the controller trims before writing.
+const validGeneralBody = {
+    name: "  Pollería Digital Core  ",
+    razonSocial: "  Pollería Digital S.R.L.  ",
+    nit: "  123456789  ",
+    phone: "  70000000  ",
+    whatsapp: "  70000001  ",
+    address: "  Av. Principal 123  ",
+    currency: "  Bs.  ",
+    ticketFooter: "  ¡Gracias por su preferencia!  ",
+    logoUrl: "  https://example.com/logo.png  "
+};
+
+const trimmedGeneralBody = {
+    name: "Pollería Digital Core",
+    razonSocial: "Pollería Digital S.R.L.",
+    nit: "123456789",
+    phone: "70000000",
+    whatsapp: "70000001",
+    address: "Av. Principal 123",
+    currency: "Bs.",
+    ticketFooter: "¡Gracias por su preferencia!",
+    logoUrl: "https://example.com/logo.png"
+};
+
+// Distinct values make an accidental write obvious in the "unchanged" cases.
+const generalBaseline = {
+    name: "Tienda del Tenant",
+    razonSocial: "Razón Anterior",
+    nit: "999",
+    phone: "111",
+    whatsapp: "222",
+    address: "Calle Vieja 1",
+    currency: "USD",
+    ticketFooter: "Footer anterior",
+    logoUrl: "https://example.com/old.png"
+};
+
+const withoutGeneralField = (field) => {
+    const body = { ...validGeneralBody };
+    delete body[field];
+    return body;
+};
+
+const expectGeneralBaseline = async (tenantModel) => {
+    const stored = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
+    expect(stored).toMatchObject(generalBaseline);
 };
 
 describe("storeConfig module", () => {
@@ -703,6 +752,140 @@ describe("storeConfig module", () => {
         const { statusCode, payload } = await call(
             updateTimezone,
             requestFor(TENANT_DB, ROLES.ADMIN, { timezone: "America/Mexico_City" })
+        );
+
+        expect(statusCode).toBe(404);
+        expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+    });
+
+    it("lets an ADMIN save all nine general store fields trimmed", async () => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create(generalBaseline);
+
+        const { statusCode, payload } = await call(
+            updateGeneralStoreConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, validGeneralBody)
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.success).toBe(true);
+        expect(payload.message).toBe(esTranslations.success_store_general_data_saved);
+        expect(payload.data).toEqual(trimmedGeneralBody);
+
+        const stored = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
+        expect(stored).toMatchObject(trimmedGeneralBody);
+    });
+
+    it("lets blank strings clear the optional general store fields", async () => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create(generalBaseline);
+
+        const body = {
+            ...validGeneralBody,
+            name: "Tienda del Tenant",
+            razonSocial: "",
+            nit: "",
+            phone: "",
+            whatsapp: "",
+            address: "",
+            currency: "",
+            ticketFooter: "",
+            logoUrl: ""
+        };
+
+        const { statusCode, payload } = await call(
+            updateGeneralStoreConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, body)
+        );
+
+        expect(statusCode).toBe(200);
+        expect(payload.data.name).toBe("Tienda del Tenant");
+        expect(payload.data.logoUrl).toBe("");
+
+        const stored = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
+        expect(stored.razonSocial).toBe("");
+        expect(stored.nit).toBe("");
+        expect(stored.phone).toBe("");
+        expect(stored.whatsapp).toBe("");
+        expect(stored.address).toBe("");
+        expect(stored.currency).toBe("");
+        expect(stored.ticketFooter).toBe("");
+        expect(stored.logoUrl).toBe("");
+    });
+
+    it.each([
+        ["a whitespace-only name", { name: "   " }],
+        ["an empty name", { name: "" }]
+    ])("returns 400 for an invalid store name when given %s", async (_, override) => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create(generalBaseline);
+
+        const { statusCode, payload } = await call(
+            updateGeneralStoreConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, { ...validGeneralBody, ...override })
+        );
+
+        expect(statusCode).toBe(400);
+        expect(payload.message).toBe(esTranslations.error_store_config_invalid_general_data);
+        await expectGeneralBaseline(tenantModel);
+    });
+
+    it.each(["name", "phone", "ticketFooter"])(
+        "returns 400 when a general data field is missing (%s)",
+        async (field) => {
+            const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+            await tenantModel.create(generalBaseline);
+
+            const { statusCode, payload } = await call(
+                updateGeneralStoreConfig,
+                requestFor(TENANT_DB, ROLES.ADMIN, withoutGeneralField(field))
+            );
+
+            expect(statusCode).toBe(400);
+            expect(payload.message).toBe(esTranslations.error_store_config_invalid_general_data);
+            await expectGeneralBaseline(tenantModel);
+        }
+    );
+
+    it.each([
+        ["a number for phone", { phone: 70000000 }],
+        ["null for logoUrl", { logoUrl: null }],
+        ["a boolean for nit", { nit: true }]
+    ])("returns 400 for non-string general data when given %s", async (_, override) => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create(generalBaseline);
+
+        const { statusCode, payload } = await call(
+            updateGeneralStoreConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, { ...validGeneralBody, ...override })
+        );
+
+        expect(statusCode).toBe(400);
+        expect(payload.message).toBe(esTranslations.error_store_config_invalid_general_data);
+        await expectGeneralBaseline(tenantModel);
+    });
+
+    it.each([
+        ["CLIENT", ROLES.CLIENT],
+        ["SELLER", ROLES.SELLER]
+    ])("returns 403 when a %s tries to save general store data", async (_, role) => {
+        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
+        await tenantModel.create(generalBaseline);
+
+        const { statusCode, payload } = await call(
+            updateGeneralStoreConfig,
+            requestFor(TENANT_DB, role, validGeneralBody)
+        );
+
+        expect(statusCode).toBe(403);
+        expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
+        await expectGeneralBaseline(tenantModel);
+    });
+
+    it("returns 404 when saving general store data without a store config", async () => {
+        const { statusCode, payload } = await call(
+            updateGeneralStoreConfig,
+            requestFor(TENANT_DB, ROLES.ADMIN, validGeneralBody)
         );
 
         expect(statusCode).toBe(404);

@@ -247,6 +247,76 @@ const updateTimezone = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Updates the tenant's general store data. All nine fields are required as
+ * strings so a partial update can never silently clear a value; every field is
+ * trimmed before it is stored, and only the store name must be non-blank.
+ */
+const updateGeneralStoreConfig = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const StoreConfig = getRequestModel(req, "StoreConfig");
+
+    try {
+        if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+            return translateErrorResponse(res, lang, "error_store_config_admin_only", 403, translations);
+        }
+
+        const { name, razonSocial, nit, phone, whatsapp, address, currency, ticketFooter, logoUrl } = req.body || {};
+
+        // null and missing values are not strings, so they are rejected here.
+        // Short-circuiting keeps name.trim() safe when the body is malformed.
+        const allFieldsAreStrings = [name, razonSocial, nit, phone, whatsapp, address, currency, ticketFooter, logoUrl]
+            .every((value) => typeof value === "string");
+
+        if (!allFieldsAreStrings || name.trim().length === 0) {
+            return translateErrorResponse(res, lang, "error_store_config_invalid_general_data", 400, translations);
+        }
+
+        const config = await StoreConfig.findOneAndUpdate(
+            { key: STORE_CONFIG_KEY },
+            {
+                $set: {
+                    name: name.trim(),
+                    razonSocial: razonSocial.trim(),
+                    nit: nit.trim(),
+                    phone: phone.trim(),
+                    whatsapp: whatsapp.trim(),
+                    address: address.trim(),
+                    currency: currency.trim(),
+                    ticketFooter: ticketFooter.trim(),
+                    logoUrl: logoUrl.trim()
+                }
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!config) {
+            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                {
+                    name: config.name,
+                    razonSocial: config.razonSocial,
+                    nit: config.nit,
+                    phone: config.phone,
+                    whatsapp: config.whatsapp,
+                    address: config.address,
+                    currency: config.currency,
+                    ticketFooter: config.ticketFooter,
+                    logoUrl: config.logoUrl
+                },
+                translations[lang]?.success_store_general_data_saved || "success_store_general_data_saved"
+            )
+        );
+    } catch (error) {
+        console.error("Error updating general store data:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
+/**
  * Stores the SMTP credentials of the request tenant. The password is encrypted
  * before it reaches the database and is never included in the response.
  */
@@ -305,4 +375,4 @@ const updateMailConfig = asyncHandler(async (req, res) => {
     }
 });
 
-export { getStoreConfig, getPublicStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateMailConfig };
+export { getStoreConfig, getPublicStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateGeneralStoreConfig, updateMailConfig };
