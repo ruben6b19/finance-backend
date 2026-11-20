@@ -2,6 +2,8 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
+import { dayNumberInZone } from "../../utils/boliviaTime.js";
+import { getRequestTimeZone } from "../../utils/storeTimeZone.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -347,17 +349,12 @@ const updatePurchase = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_purchase_not_found", 404, translations);
         }
 
-        // Rule: Only today's purchases (considering Bolivia time UTC-4)
-        const getBoliviaDay = (d) => {
-            const date = new Date(d);
-            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-            return boliviaTime.toISOString().split('T')[0];
-        };
+        // Rule: only purchases from today in the store's configured time zone.
+        const timeZone = await getRequestTimeZone(req);
+        const txDay = dayNumberInZone(updatedPurchase.purchaseDate, timeZone);
+        const today = dayNumberInZone(new Date(), timeZone);
 
-        const txDate = getBoliviaDay(updatedPurchase.purchaseDate);
-        const today = getBoliviaDay(new Date());
-
-        if (txDate !== today) {
+        if (txDay === null || txDay !== today) {
             return translateErrorResponse(res, lang, "error_purchase_immutable_date", 403, translations);
         }
 
@@ -394,17 +391,12 @@ const deletePurchase = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_purchase_not_found", 404, translations);
         }
 
-        // Rule: Only today's purchases (considering Bolivia time UTC-4)
-        const getBoliviaDay = (d) => {
-            const date = new Date(d);
-            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-            return boliviaTime.toISOString().split('T')[0];
-        };
+        // Rule: only purchases from today in the store's configured time zone.
+        const timeZone = await getRequestTimeZone(req);
+        const txDay = dayNumberInZone(purchase.purchaseDate, timeZone);
+        const today = dayNumberInZone(new Date(), timeZone);
 
-        const txDate = getBoliviaDay(purchase.purchaseDate);
-        const today = getBoliviaDay(new Date());
-
-        if (txDate !== today) {
+        if (txDay === null || txDay !== today) {
             await session.abortTransaction();
             session.endSession();
             return translateErrorResponse(res, lang, "error_purchase_immutable_date", 403, translations);

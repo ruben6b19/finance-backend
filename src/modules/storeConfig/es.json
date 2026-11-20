@@ -5,6 +5,12 @@
     "error_store_config_admin_only": "Solo los administradores pueden modificar la configuración de correo.",
     "error_store_config_invalid_mail": "Los datos de correo son inválidos. Verifique el usuario, la contraseña y el correo de copia.",
     "success_store_mail_config_saved": "Configuración de correo guardada exitosamente.",
+    "error_store_config_invalid_delivery_options": "Las opciones de entrega deben ser valores booleanos para los tres tipos.",
+    "success_store_delivery_options_saved": "Opciones de entrega guardadas.",
+    "error_store_config_invalid_coordinates": "Las coordenadas deben ser números válidos (latitud -90 a 90, longitud -180 a 180) o nulo.",
+    "success_store_coordinates_saved": "Coordenadas de la tienda guardadas.",
+    "error_store_config_invalid_timezone": "La zona horaria debe ser un nombre IANA válido (por ejemplo America/La_Paz).",
+    "success_store_timezone_saved": "Zona horaria de la tienda guardada.",
 
     "error_internal_server_generic": "Ha ocurrido un error inesperado en el servidor."
 }

@@ -8,6 +8,7 @@ import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast } from "../../utils/roles.js";
 import { encrypt } from "../../utils/mailCrypto.js";
+import { DEFAULT_TIME_ZONE } from "../../utils/boliviaTime.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,8 +22,9 @@ const getLang = (req) => {
 };
 
 /**
- * Public shape of the store settings: the storefront shows the store name
- * before anyone signs in, so this route exposes only `name` and never the
+ * Public shape of the store settings: the storefront shows the store name,
+ * the three delivery-option visibility flags, the store coordinates and its
+ * IANA time zone before anyone signs in, but this route never exposes the
  * fiscal or contact data the authenticated route returns.
  */
 const getPublicStoreConfig = asyncHandler(async (req, res) => {
@@ -33,7 +35,7 @@ const getPublicStoreConfig = asyncHandler(async (req, res) => {
 
     try {
         const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
-            .select("name -_id")
+            .select("name latitude longitude timezone dineInEnabled pickupEnabled deliveryEnabled -_id")
             .lean();
 
         if (!config) {
@@ -43,7 +45,15 @@ const getPublicStoreConfig = asyncHandler(async (req, res) => {
         return res.status(200).json(
             new ApiResponse(
                 200,
-                { name: config.name },
+                {
+                    name: config.name,
+                    latitude: config.latitude ?? null,
+                    longitude: config.longitude ?? null,
+                    timezone: config.timezone ?? DEFAULT_TIME_ZONE,
+                    dineInEnabled: config.dineInEnabled ?? true,
+                    pickupEnabled: config.pickupEnabled ?? true,
+                    deliveryEnabled: config.deliveryEnabled ?? true
+                },
                 translations[lang]?.success_store_name_fetched || "success_store_name_fetched"
             )
         );
@@ -61,18 +71,177 @@ const getStoreConfig = asyncHandler(async (req, res) => {
 
     try {
         const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
-            .select("name razonSocial nit phone whatsapp address currency ticketFooter logoUrl -_id")
+            .select("name razonSocial nit phone whatsapp address latitude longitude timezone currency dineInEnabled pickupEnabled deliveryEnabled ticketFooter logoUrl -_id")
             .lean();
 
         if (!config) {
             return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
         }
 
+        const data = { ...config, timezone: config.timezone ?? DEFAULT_TIME_ZONE };
+
         return res.status(200).json(
-            new ApiResponse(200, config, translations[lang]?.success_store_config_fetched || "success_store_config_fetched")
+            new ApiResponse(200, data, translations[lang]?.success_store_config_fetched || "success_store_config_fetched")
         );
     } catch (error) {
         console.error("Error fetching store config:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
+const updateDeliveryOptions = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const StoreConfig = getRequestModel(req, "StoreConfig");
+
+    try {
+        if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+            return translateErrorResponse(res, lang, "error_store_config_admin_only", 403, translations);
+        }
+
+        const { dineInEnabled, pickupEnabled, deliveryEnabled } = req.body || {};
+
+        if (
+            typeof dineInEnabled !== "boolean" ||
+            typeof pickupEnabled !== "boolean" ||
+            typeof deliveryEnabled !== "boolean"
+        ) {
+            return translateErrorResponse(res, lang, "error_store_config_invalid_delivery_options", 400, translations);
+        }
+
+        const config = await StoreConfig.findOneAndUpdate(
+            { key: STORE_CONFIG_KEY },
+            {
+                $set: {
+                    dineInEnabled,
+                    pickupEnabled,
+                    deliveryEnabled
+                }
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!config) {
+            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                {
+                    dineInEnabled: config.dineInEnabled,
+                    pickupEnabled: config.pickupEnabled,
+                    deliveryEnabled: config.deliveryEnabled
+                },
+                translations[lang]?.success_store_delivery_options_saved || "success_store_delivery_options_saved"
+            )
+        );
+    } catch (error) {
+        console.error("Error updating store delivery options:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
+const updateCoordinates = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const StoreConfig = getRequestModel(req, "StoreConfig");
+
+    try {
+        if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+            return translateErrorResponse(res, lang, "error_store_config_admin_only", 403, translations);
+        }
+
+        const { latitude, longitude } = req.body || {};
+
+        // null clears a coordinate; otherwise both values must be finite numbers
+        // in range. Missing fields are undefined and therefore rejected, so
+        // partial updates are not allowed. Strings are never coerced.
+        const isLatitudeValid =
+            latitude === null ||
+            (typeof latitude === "number" && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90);
+        const isLongitudeValid =
+            longitude === null ||
+            (typeof longitude === "number" && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180);
+
+        if (!isLatitudeValid || !isLongitudeValid) {
+            return translateErrorResponse(res, lang, "error_store_config_invalid_coordinates", 400, translations);
+        }
+
+        const config = await StoreConfig.findOneAndUpdate(
+            { key: STORE_CONFIG_KEY },
+            {
+                $set: {
+                    latitude,
+                    longitude
+                }
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!config) {
+            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                { latitude: config.latitude, longitude: config.longitude },
+                translations[lang]?.success_store_coordinates_saved || "success_store_coordinates_saved"
+            )
+        );
+    } catch (error) {
+        console.error("Error updating store coordinates:", error);
+        return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
+    }
+});
+
+/**
+ * Sets the tenant's IANA time zone. Business windows and customer emails both
+ * use this value, so numeric offsets are rejected by Intl.
+ */
+const updateTimezone = asyncHandler(async (req, res) => {
+    const lang = getLang(req);
+    const StoreConfig = getRequestModel(req, "StoreConfig");
+
+    try {
+        if (!hasRoleAtLeast(req, ROLES.ADMIN)) {
+            return translateErrorResponse(res, lang, "error_store_config_admin_only", 403, translations);
+        }
+
+        const { timezone } = req.body || {};
+        const trimmedTimezone = typeof timezone === "string" ? timezone.trim() : "";
+
+        let isValid = trimmedTimezone.length > 0;
+        if (isValid) {
+            try {
+                new Intl.DateTimeFormat("en", { timeZone: trimmedTimezone });
+            } catch (error) {
+                isValid = false;
+            }
+        }
+
+        if (!isValid) {
+            return translateErrorResponse(res, lang, "error_store_config_invalid_timezone", 400, translations);
+        }
+
+        const config = await StoreConfig.findOneAndUpdate(
+            { key: STORE_CONFIG_KEY },
+            { $set: { timezone: trimmedTimezone } },
+            { new: true, runValidators: true }
+        );
+
+        if (!config) {
+            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                { timezone: config.timezone },
+                translations[lang]?.success_store_timezone_saved || "success_store_timezone_saved"
+            )
+        );
+    } catch (error) {
+        console.error("Error updating store timezone:", error);
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }
 });
@@ -136,4 +305,4 @@ const updateMailConfig = asyncHandler(async (req, res) => {
     }
 });
 
-export { getStoreConfig, getPublicStoreConfig, updateMailConfig };
+export { getStoreConfig, getPublicStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateMailConfig };

@@ -125,8 +125,8 @@ beforeEach(async () => {
 describe("sale modification policy", () => {
     const now = new Date("2026-11-14T15:00:00.000Z");
 
-    const check = (saleDate, roles) =>
-        checkSaleModificationWindow({ saleDate, roles, now });
+    const check = (saleDate, roles, timeZone) =>
+        checkSaleModificationWindow({ saleDate, roles, now, timeZone });
 
     itDb("lets a seller modify a sale from today only", () => {
         expect(check("2026-11-14T10:00:00.000Z", SELLER).allowed).toBe(true);
@@ -161,6 +161,26 @@ describe("sale modification policy", () => {
             allowed: false,
             daysElapsed: 1
         });
+    });
+
+    itDb("uses the configured store zone so a non-default zone shifts the edit window", () => {
+        // The sale is 06:00Z on 14/11: already the next day in Bolivia, but
+        // still 14/11 in Mexico City at 05:30Z on 15/11.
+        const crossedMidnight = new Date("2026-11-15T05:30:00.000Z");
+        const saleDate = "2026-11-14T06:00:00.000Z";
+
+        expect(checkSaleModificationWindow({
+            saleDate,
+            roles: SELLER,
+            now: crossedMidnight
+        })).toMatchObject({ allowed: false, daysElapsed: 1 });
+
+        expect(checkSaleModificationWindow({
+            saleDate,
+            roles: SELLER,
+            now: crossedMidnight,
+            timeZone: "America/Mexico_City"
+        })).toMatchObject({ allowed: true, daysElapsed: 0 });
     });
 
     itDb("allows future dated sales so the window cannot be bypassed by re-dating", () => {

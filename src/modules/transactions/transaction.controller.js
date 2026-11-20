@@ -2,6 +2,8 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
+import { dayNumberInZone } from "../../utils/boliviaTime.js";
+import { getRequestTimeZone } from "../../utils/storeTimeZone.js";
 import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
@@ -238,18 +240,12 @@ const updateTransaction = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_transaction_immutable_system", 403, translations);
         }
 
-        // Rule 2: Only today's transactions (considering Bolivia time UTC-4)
-        const getBoliviaDay = (d) => {
-            const date = new Date(d);
-            // Restamos 4 horas para obtener la fecha en Bolivia
-            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-            return boliviaTime.toISOString().split('T')[0];
-        };
+        // Rule 2: only transactions from today in the store's time zone.
+        const timeZone = await getRequestTimeZone(req);
+        const txDay = dayNumberInZone(transaction.date, timeZone);
+        const today = dayNumberInZone(new Date(), timeZone);
 
-        const txDate = getBoliviaDay(transaction.date);
-        const today = getBoliviaDay(new Date());
-
-        if (txDate !== today) {
+        if (txDay === null || txDay !== today) {
             return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
         }
 
@@ -289,18 +285,12 @@ const deleteTransaction = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_transaction_immutable_system", 403, translations);
         }
 
-        // Rule 2: Only today's transactions (considering Bolivia time UTC-4)
-        const getBoliviaDay = (d) => {
-            const date = new Date(d);
-            // Restamos 4 horas para obtener la fecha en Bolivia
-            const boliviaTime = new Date(date.getTime() - (4 * 60 * 60 * 1000));
-            return boliviaTime.toISOString().split('T')[0];
-        };
+        // Rule 2: only transactions from today in the store's time zone.
+        const timeZone = await getRequestTimeZone(req);
+        const txDay = dayNumberInZone(transaction.date, timeZone);
+        const today = dayNumberInZone(new Date(), timeZone);
 
-        const txDate = getBoliviaDay(transaction.date);
-        const today = getBoliviaDay(new Date());
-
-        if (txDate !== today) {
+        if (txDay === null || txDay !== today) {
             return translateErrorResponse(res, lang, "error_transaction_immutable_date", 403, translations);
         }
 

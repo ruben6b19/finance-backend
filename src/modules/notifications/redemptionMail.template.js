@@ -1,5 +1,6 @@
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
+import { DEFAULT_TIME_ZONE } from "../../utils/boliviaTime.js";
 
 const translations = {
     es: esTranslations,
@@ -17,11 +18,16 @@ const escapeHtml = (value) =>
 const interpolate = (copy, values = {}) =>
     String(copy ?? "").replace(/\{\{(\w+)\}\}/g, (_, key) => String(values[key] ?? ""));
 
-const formatDateTime = (value, lang) => {
+const formatDateTime = (value, lang, timeZone = DEFAULT_TIME_ZONE) => {
     if (!value) return "";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleString(lang === "en" ? "en-US" : "es-ES");
+    const locale = lang === "en" ? "en-US" : "es-ES";
+    try {
+        return date.toLocaleString(locale, { timeZone });
+    } catch (error) {
+        return date.toLocaleString(locale);
+    }
 };
 
 /**
@@ -34,7 +40,8 @@ const buildComboRedemptionMail = ({
     redemption = {},
     items = [],
     storeConfig = {},
-    lang = "es"
+    lang = "es",
+    timeZone = DEFAULT_TIME_ZONE
 }) => {
     const copy = translations[lang] || translations.es;
     const voucherCode = String(voucher.code ?? "");
@@ -61,7 +68,7 @@ const buildComboRedemptionMail = ({
     );
     textRows.push(`${copy.redemption_voucher_code_label}: ${voucherCode}`);
 
-    const redeemedAt = formatDateTime(redemption.redeemedAt, lang);
+    const redeemedAt = formatDateTime(redemption.redeemedAt, lang, timeZone);
     htmlRows.push(
         `<p><strong>${escapeHtml(copy.redemption_date_label)}:</strong> ${escapeHtml(redeemedAt)}</p>`
     );

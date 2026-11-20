@@ -1,5 +1,5 @@
 import { ROLES } from "../../constants/roles.js";
-import { daysElapsedInBolivia } from "../../utils/boliviaTime.js";
+import { DEFAULT_TIME_ZONE, daysElapsedInZone } from "../../utils/boliviaTime.js";
 
 // Roles que pueden anular un canje. El vendedor solo el mismo día.
 export const REDEMPTION_VOID_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.SELLER];
@@ -31,14 +31,14 @@ export const resolveRedemptionVoidWindow = (roles = []) => {
  * Decide si el usuario puede anular un canje hecho en `redeemedAt`.
  * @returns {{allowed: boolean, maxDays: number|null, daysElapsed: number|null, errorCode: string|null}}
  */
-export const checkRedemptionVoidWindow = ({ redeemedAt, roles = [], now = new Date() }) => {
+export const checkRedemptionVoidWindow = ({ redeemedAt, roles = [], now = new Date(), timeZone = DEFAULT_TIME_ZONE }) => {
     const maxDays = resolveRedemptionVoidWindow(roles);
 
     if (maxDays === null) {
         return { allowed: false, maxDays: null, daysElapsed: null, errorCode: "error_redemption_forbidden" };
     }
 
-    const daysElapsed = daysElapsedInBolivia(redeemedAt, now);
+    const daysElapsed = daysElapsedInZone(redeemedAt, now, timeZone);
 
     if (daysElapsed === null) {
         return { allowed: false, maxDays, daysElapsed: null, errorCode: "error_redemption_void_window_expired" };

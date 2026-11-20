@@ -15,6 +15,7 @@ import {
 import { cancelComboVouchersForSale, COMBO_VOUCHER_ERROR_CODES } from "../combos/comboPurchase.service.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast, normalizeRoles } from "../../utils/roles.js";
+import { getRequestTimeZone } from "../../utils/storeTimeZone.js";
 import {
     canChangeSaleDate,
     checkSaleModificationWindow
@@ -278,7 +279,8 @@ const updateSale = asyncHandler(async (req, res) => {
     }
 
     const roles = normalizeRoles(req.user?.role);
-    const windowCheck = checkSaleModificationWindow({ saleDate: sale.saleDate, roles });
+    const timeZone = await getRequestTimeZone(req);
+    const windowCheck = checkSaleModificationWindow({ saleDate: sale.saleDate, roles, timeZone });
 
     if (!windowCheck.allowed) {
         return translateErrorResponse(res, lang, windowCheck.errorCode, 403, translations);
@@ -384,9 +386,11 @@ const deleteSale = asyncHandler(async (req, res) => {
 
         // Rule: solo el mismo día para el vendedor; hasta 7 días para
         // supervisor y admin. Se mide sobre la fecha original de la venta.
+        const timeZone = await getRequestTimeZone(req);
         const windowCheck = checkSaleModificationWindow({
             saleDate: sale.saleDate,
-            roles: normalizeRoles(req.user?.role)
+            roles: normalizeRoles(req.user?.role),
+            timeZone
         });
 
         if (!windowCheck.allowed) {
@@ -535,9 +539,11 @@ const cancelSale = asyncHandler(async (req, res) => {
 
     // Rule: solo el mismo día para el vendedor; hasta 7 días para
     // supervisor y admin. Se mide sobre la fecha original de la venta.
+    const timeZone = await getRequestTimeZone(req);
     const windowCheck = checkSaleModificationWindow({
         saleDate: sale.saleDate,
-        roles: normalizeRoles(req.user?.role)
+        roles: normalizeRoles(req.user?.role),
+        timeZone
     });
 
     if (!windowCheck.allowed) {

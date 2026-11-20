@@ -64,6 +64,22 @@ describe("buildOrderStatusMail", () => {
         expect(mail.html).not.toContain("CB1");
     });
 
+    it("renders the pickup time in the supplied store time zone", () => {
+        const pickupAt = "2026-11-20T12:00:00.000Z";
+        const mail = buildOrderStatusMail({
+            order: orderFixture({ pickupAt }),
+            status: 1,
+            timeZone: "America/Mexico_City",
+            lang: "en"
+        });
+
+        const expected = new Date(pickupAt).toLocaleString("en-US", {
+            timeZone: "America/Mexico_City"
+        });
+        expect(mail.text).toContain(expected);
+        expect(mail.html).toContain(expected);
+    });
+
     it("labels voucher codes in English for a confirmed combo order", () => {
         const mail = buildOrderStatusMail({
             order: orderFixture(),

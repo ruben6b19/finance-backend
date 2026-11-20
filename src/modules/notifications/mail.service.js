@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
 import { decrypt } from "../../utils/mailCrypto.js";
+import { DEFAULT_TIME_ZONE } from "../../utils/boliviaTime.js";
 import { buildOrderStatusMail } from "./orderMail.template.js";
 import { buildComboRedemptionMail } from "./redemptionMail.template.js";
 
@@ -92,7 +93,7 @@ const sendOrderStatusEmail = async ({
 
     // smtpPassEncrypted has select: false, so the explicit "+field" is required.
     const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
-        .select("name phone whatsapp smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
+        .select("name phone whatsapp timezone smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
         .lean();
 
     const template = buildOrderStatusMail({
@@ -100,7 +101,8 @@ const sendOrderStatusEmail = async ({
         status,
         storeConfig: config || {},
         comboVouchers,
-        lang
+        lang,
+        timeZone: config?.timezone ?? DEFAULT_TIME_ZONE
     });
 
     return sendRawMail({
@@ -131,7 +133,7 @@ const sendComboRedemptionEmail = async ({
 
     // smtpPassEncrypted has select: false, so the explicit "+field" is required.
     const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
-        .select("name phone whatsapp smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
+        .select("name phone whatsapp timezone smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
         .lean();
 
     const template = buildComboRedemptionMail({
@@ -139,7 +141,8 @@ const sendComboRedemptionEmail = async ({
         redemption,
         items,
         storeConfig: config || {},
-        lang
+        lang,
+        timeZone: config?.timezone ?? DEFAULT_TIME_ZONE
     });
 
     return sendRawMail({

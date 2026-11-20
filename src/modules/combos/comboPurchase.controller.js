@@ -3,6 +3,7 @@ import { ApiResponse } from "../../utils/ApiResponse.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
 import { ROLES } from "../../constants/roles.js";
 import { hasRoleAtLeast, normalizeRoles, roleAtLeast } from "../../utils/roles.js";
+import { getRequestTimeZone } from "../../utils/storeTimeZone.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { checkRedemptionVoidWindow } from "./redemption.policy.js";
 import mongoose from "mongoose";
@@ -590,6 +591,7 @@ const voidRedemption = asyncHandler(async (req, res) => {
     const Product = getModel("Product");
     const { comboPurchaseId, redemptionId } = req.params;
     const { voidReason } = req.body || {};
+    const timeZone = await getRequestTimeZone(req);
 
     // a. Anulación de un canje: el vendedor solo el mismo día; supervisor y
     // admin hasta 7 días. Se mide sobre la fecha del canje.
@@ -633,7 +635,8 @@ const voidRedemption = asyncHandler(async (req, res) => {
             // b. Ventana de anulación: se mide sobre la fecha del canje original.
             const voidCheck = checkRedemptionVoidWindow({
                 redeemedAt: redemption.redeemedAt,
-                roles: normalizeRoles(req.user?.role)
+                roles: normalizeRoles(req.user?.role),
+                timeZone
             });
 
             if (!voidCheck.allowed) {

@@ -140,6 +140,23 @@ describe("sendOrderStatusEmail", () => {
         expect(message.html).not.toContain("CB000001");
     });
 
+    it("renders customer timestamps in the tenant's configured time zone", async () => {
+        const fakes = setup(storeConfigFixture({ timezone: "America/Mexico_City" }));
+
+        await sendOrderStatusEmail({
+            getModel: fakes.getModel,
+            order: orderFixture(),
+            status: 1,
+            lang: "es",
+            createTransport: fakes.createTransport
+        });
+
+        const expected = new Date("2026-11-20T12:00:00.000Z").toLocaleString("es-ES", {
+            timeZone: "America/Mexico_City"
+        });
+        expect(fakes.sendMail.mock.calls[0][0].text).toContain(expected);
+    });
+
     it.each([
         ["no config", null],
         ["no SMTP user", { smtpUser: "", smtpPassEncrypted: "placeholder" }],

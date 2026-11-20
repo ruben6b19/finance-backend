@@ -80,6 +80,20 @@ describe("buildComboRedemptionMail", () => {
         expect(mail.text).toContain("<img src=x>");
     });
 
+    it("renders the redemption date in the supplied store time zone", () => {
+        const redeemedAt = "2026-11-19T12:00:00.000Z";
+        const mail = buildComboRedemptionMail(redemptionFixture({
+            redemption: { redeemedAt },
+            timeZone: "America/Mexico_City"
+        }));
+
+        const expected = new Date(redeemedAt).toLocaleString("es-ES", {
+            timeZone: "America/Mexico_City"
+        });
+        expect(mail.text).toContain(expected);
+        expect(mail.html).toContain(expected);
+    });
+
     it("includes the store name and contact rows when provided", () => {
         const mail = buildComboRedemptionMail(redemptionFixture());
 

@@ -5,6 +5,12 @@
     "error_store_config_admin_only": "Only administrators can update the mail configuration.",
     "error_store_config_invalid_mail": "Invalid mail settings. Check the user, password and BCC email address.",
     "success_store_mail_config_saved": "Mail configuration saved successfully.",
+    "error_store_config_invalid_delivery_options": "All three delivery option flags must be boolean values.",
+    "success_store_delivery_options_saved": "Delivery options saved.",
+    "error_store_config_invalid_coordinates": "Coordinates must be valid numbers (latitude -90 to 90, longitude -180 to 180) or null.",
+    "success_store_coordinates_saved": "Store coordinates saved.",
+    "error_store_config_invalid_timezone": "Timezone must be a valid IANA name (for example America/La_Paz).",
+    "success_store_timezone_saved": "Store timezone saved.",
 
     "error_internal_server_generic": "An unexpected server error occurred."
 }

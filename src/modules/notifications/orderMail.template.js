@@ -1,5 +1,6 @@
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
+import { DEFAULT_TIME_ZONE } from "../../utils/boliviaTime.js";
 
 // Local status constants keep the template pure: it must not load a Mongoose
 // model just to render a string.
@@ -27,11 +28,16 @@ const toAmount = (value) => {
     return Number.isFinite(amount) ? amount.toFixed(2) : "0.00";
 };
 
-const formatPickupAt = (value, lang) => {
+const formatPickupAt = (value, lang, timeZone = DEFAULT_TIME_ZONE) => {
     if (!value) return "";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleString(lang === "en" ? "en-US" : "es-ES");
+    const locale = lang === "en" ? "en-US" : "es-ES";
+    try {
+        return date.toLocaleString(locale, { timeZone });
+    } catch (error) {
+        return date.toLocaleString(locale);
+    }
 };
 
 const deliveryLabel = (copy, deliveryType) => {
@@ -44,7 +50,7 @@ const deliveryLabel = (copy, deliveryType) => {
  * email. It is intentionally free of side effects and I/O so it can be tested
  * without a database or an SMTP server.
  */
-const buildOrderStatusMail = ({ order = {}, status, storeConfig = {}, comboVouchers, lang = "es" }) => {
+const buildOrderStatusMail = ({ order = {}, status, storeConfig = {}, comboVouchers, lang = "es", timeZone = DEFAULT_TIME_ZONE }) => {
     const copy = translations[lang] || translations.es;
     const orderCode = String(order.code ?? "");
     const isConfirmed = Number(status) === STATUS.CONFIRMED;
@@ -100,9 +106,9 @@ const buildOrderStatusMail = ({ order = {}, status, storeConfig = {}, comboVouch
         textRows.push(`${copy.delivery_label}: ${deliveryLabel(copy, order.deliveryType)}`);
 
         htmlRows.push(
-            `<p><strong>${escapeHtml(copy.pickup_label)}:</strong> ${escapeHtml(formatPickupAt(order.pickupAt, lang))}</p>`
+            `<p><strong>${escapeHtml(copy.pickup_label)}:</strong> ${escapeHtml(formatPickupAt(order.pickupAt, lang, timeZone))}</p>`
         );
-        textRows.push(`${copy.pickup_label}: ${formatPickupAt(order.pickupAt, lang)}`);
+        textRows.push(`${copy.pickup_label}: ${formatPickupAt(order.pickupAt, lang, timeZone)}`);
 
         htmlRows.push(
             `<p><strong>${escapeHtml(copy.address_label)}:</strong> ${escapeHtml(order.address || "")}</p>`

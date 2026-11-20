@@ -21,6 +21,7 @@ import {
     voidRedemption,
     getVoucherReconciliation
 } from "./comboPurchase.controller.js";
+import { checkRedemptionVoidWindow } from "./redemption.policy.js";
 
 let server;
 let voucher;
@@ -616,6 +617,22 @@ const seedVoucherWithPlainComponent = async ({
 };
 
 describe("void redemption window", () => {
+    it("shifts the void window when the store uses a non-default time zone", () => {
+        const now = new Date("2026-11-15T05:30:00.000Z");
+        const redeemedAt = "2026-11-14T06:00:00.000Z";
+
+        expect(checkRedemptionVoidWindow({ redeemedAt, roles: [2], now })).toMatchObject({
+            allowed: false,
+            daysElapsed: 1
+        });
+        expect(checkRedemptionVoidWindow({
+            redeemedAt,
+            roles: [2],
+            now,
+            timeZone: "America/Mexico_City"
+        })).toMatchObject({ allowed: true, daysElapsed: 0 });
+    });
+
     const voidRequest = (code, redemptionId, role) =>
         request({
             params: { comboPurchaseId: code, redemptionId: String(redemptionId) },
