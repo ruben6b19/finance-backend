@@ -1,6 +1,10 @@
+import { jest } from "@jest/globals";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
+import nodemailer from "nodemailer";
 
+import { encrypt } from "../../utils/mailCrypto.js";
+import { StoreConfig, STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
 import { Product } from "../products/product.model.js";
 import { User } from "../users/user.model.js";
 import { ComboDefinition } from "./comboDefinition.model.js";
@@ -789,6 +793,102 @@ describe("redemption stock for plain components", () => {
 
         expect(statusCode).toBe(201);
         expect((await Product.findById(product._id)).stock).toBe(10);
+    });
+});
+
+describe("combo redemption mail", () => {
+    const TEST_KEY = "test-mail-encryption-passphrase";
+    const ORIGINAL_KEY = process.env.MAIL_ENCRYPTION_KEY;
+
+    beforeAll(() => {
+        process.env.MAIL_ENCRYPTION_KEY = TEST_KEY;
+    });
+
+    afterAll(() => {
+        if (ORIGINAL_KEY === undefined) {
+            delete process.env.MAIL_ENCRYPTION_KEY;
+        } else {
+            process.env.MAIL_ENCRYPTION_KEY = ORIGINAL_KEY;
+        }
+    });
+
+    it("sends a redemption receipt to the voucher owner after a successful redemption", async () => {
+        const customer = await User.create({
+            email: "redemption-owner@example.com",
+            fullName: "Redemption Owner",
+            firebaseUid: "uid-redemption-owner",
+            role: [3],
+            status: 1
+        });
+        const product = await Product.create({
+            name: "Mail Redemption Water",
+            price: 5,
+            unit: new mongoose.Types.ObjectId(),
+            productType: 2,
+            isSellable: true,
+            stock: 20
+        });
+        const code = "FA000001";
+        const ownerVoucher = await ComboPurchase.create({
+            code,
+            comboProduct: comboProductId,
+            comboDefinition: comboDefinitionId,
+            sale: new mongoose.Types.ObjectId(),
+            customerName: "Redemption Owner",
+            customerPhone: "12345678",
+            customerId: customer._id,
+            purchasedAt: new Date("2026-11-19T10:00:00.000Z"),
+            expiresAt: null,
+            pricePaid: 20,
+            balances: [
+                {
+                    product: product._id,
+                    includedQty: 5,
+                    usedQty: 0,
+                    stockProduct: product._id,
+                    conversionFactor: 1
+                }
+            ],
+            totalUnits: 5,
+            usedUnits: 0,
+            status: 0
+        });
+        await StoreConfig.create({
+            key: STORE_CONFIG_KEY,
+            name: "Mi Tienda",
+            smtpUser: "store@example.com",
+            smtpPassEncrypted: encrypt("smtp-password"),
+            adminBccEmail: "admin@example.com"
+        });
+
+        const infoSpy = jest.spyOn(console, "info").mockImplementation(() => {});
+        const transportSpy = jest.spyOn(nodemailer, "createTransport").mockReturnValue({
+            sendMail: jest.fn().mockResolvedValue({})
+        });
+
+        try {
+            const { statusCode, payload } = await call(createRedemption, request({
+                params: { comboPurchaseId: code },
+                user: { mongoDbId: new mongoose.Types.ObjectId(), role: [2] },
+                body: {
+                    idempotencyKey: `mail-redemption-${code}`,
+                    items: [{ product: String(product._id), quantity: 2 }]
+                }
+            }));
+
+            expect(statusCode).toBe(201);
+            expect(payload.data.comboPurchase.code).toBe(code);
+            expect(String(payload.data.comboPurchase._id)).toBe(String(ownerVoucher._id));
+
+            const mailLogs = infoSpy.mock.calls.filter(
+                ([message]) => message === "[mail] redemption send result"
+            );
+            expect(mailLogs).toHaveLength(1);
+            expect(mailLogs[0][1]).toMatchObject({ voucherCode: code, sent: true });
+        } finally {
+            infoSpy.mockRestore();
+            transportSpy.mockRestore();
+        }
     });
 });
 

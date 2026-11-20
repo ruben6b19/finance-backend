@@ -20,5 +20,14 @@
     "rejected_contact": "If you have any questions, please contact us:",
     "store_label": "Store",
     "phone_label": "Phone",
-    "whatsapp_label": "WhatsApp"
+    "whatsapp_label": "WhatsApp",
+    "redemption_subject": "Voucher {{voucherCode}} redeemed",
+    "redemption_title": "Voucher redemption receipt",
+    "redemption_voucher_code_label": "Voucher code",
+    "redemption_date_label": "Redeemed at",
+    "redemption_items_label": "Redeemed items",
+    "redemption_remaining_label": "Remaining voucher balance",
+    "redemption_remaining_units": "{{remaining}} of {{total}} units",
+    "redemption_item_remaining": "{{remaining}} left",
+    "redemption_thank_you": "Thank you for your preference."
 }

@@ -9,6 +9,7 @@ import mongoose from "mongoose";
 import esTranslations from './es.json' with { type: 'json' };
 import enTranslations from './en.json' with { type: 'json' };
 import { translateErrorResponse } from "../../utils/i18nErrorResponse.js";
+import { sendComboRedemptionEmail } from "../notifications/mail.service.js";
 
 const translations = {
     es: esTranslations,
@@ -369,6 +370,9 @@ const createRedemption = asyncHandler(async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
+    let updatedVoucher;
+    let created;
+
     try {
         // Relectura dentro de la sesión: el saldo autoritativo es el de acá.
         const current = await ComboPurchase.findById(voucher._id).session(session);
@@ -452,7 +456,7 @@ const createRedemption = asyncHandler(async (req, res) => {
         const now = new Date();
 
         // CAS sobre usedUnits: dos canjes concurrentes no pueden aplicar ambos.
-        const updatedVoucher = await ComboPurchase.findOneAndUpdate(
+        updatedVoucher = await ComboPurchase.findOneAndUpdate(
             { _id: current._id, status: 0, usedUnits: current.usedUnits },
             {
                 $set: {
@@ -469,7 +473,7 @@ const createRedemption = asyncHandler(async (req, res) => {
             throw new Error("REDEMPTION_CONFLICT");
         }
 
-        const created = await ComboRedemption.create([{
+        created = await ComboRedemption.create([{
             comboPurchase: current._id,
             items: normalizedItems,
             operator: req.user?.mongoDbId || null,
@@ -480,14 +484,6 @@ const createRedemption = asyncHandler(async (req, res) => {
 
         await session.commitTransaction();
         session.endSession();
-
-        return res.status(201).json(
-            new ApiResponse(
-                201,
-                { redemption: created[0], comboPurchase: updatedVoucher },
-                translations[lang]?.success_redemption_created || "success_redemption_created"
-            )
-        );
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -525,6 +521,55 @@ const createRedemption = asyncHandler(async (req, res) => {
 
         return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
     }
+
+    // Mail is best-effort and runs after commit. The recipient comes from the
+    // voucher owner, never from the counter staff member making the request.
+    try {
+        const User = getModel("User");
+        const customer = voucher.customerId
+            ? await User.findById(voucher.customerId).select("email").lean()
+            : null;
+
+        const redeemedIds = [...new Set(normalizedItems.map((item) => String(item.product)))];
+        const productDocs = await Product.find({ _id: { $in: redeemedIds } }).select("name").lean();
+        const nameById = new Map(productDocs.map((doc) => [String(doc._id), doc.name]));
+
+        const balanceById = new Map();
+        for (const balance of updatedVoucher.balances || []) {
+            balanceById.set(String(balance.product), balance);
+        }
+
+        const itemsWithNames = normalizedItems.map((item) => {
+            const balance = balanceById.get(String(item.product));
+            return {
+                name: nameById.get(String(item.product)) || String(item.product),
+                quantity: item.quantity,
+                remaining: Math.max(0, (Number(balance?.includedQty) || 0) - (Number(balance?.usedQty) || 0))
+            };
+        });
+
+        const result = await sendComboRedemptionEmail({
+            getModel,
+            voucher: updatedVoucher,
+            redemption: created[0],
+            items: itemsWithNames,
+            to: customer?.email,
+            lang
+        });
+        console.info("[mail] redemption send result", {
+            voucherCode: updatedVoucher?.code, ...result
+        });
+    } catch (error) {
+        console.error("[mail] failed to send combo redemption email", error);
+    }
+
+    return res.status(201).json(
+        new ApiResponse(
+            201,
+            { redemption: created[0], comboPurchase: updatedVoucher },
+            translations[lang]?.success_redemption_created || "success_redemption_created"
+        )
+    );
 });
 
 // Mongo puede abortar una transacción con TransientTransactionError (contención

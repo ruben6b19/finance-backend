@@ -20,5 +20,14 @@
     "rejected_contact": "Si tiene alguna consulta, contáctenos:",
     "store_label": "Tienda",
     "phone_label": "Teléfono",
-    "whatsapp_label": "WhatsApp"
+    "whatsapp_label": "WhatsApp",
+    "redemption_subject": "Vale {{voucherCode}} retirado",
+    "redemption_title": "Comprobante de retiro de su vale",
+    "redemption_voucher_code_label": "Código de vale",
+    "redemption_date_label": "Fecha del retiro",
+    "redemption_items_label": "Productos retirados",
+    "redemption_remaining_label": "Saldo restante del vale",
+    "redemption_remaining_units": "{{remaining}} de {{total}} unidades",
+    "redemption_item_remaining": "Quedan {{remaining}}",
+    "redemption_thank_you": "Gracias por su preferencia."
 }

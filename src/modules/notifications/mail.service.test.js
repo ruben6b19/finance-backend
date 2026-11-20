@@ -2,7 +2,7 @@ import { jest } from "@jest/globals";
 
 import { encrypt } from "../../utils/mailCrypto.js";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
-import { sendOrderStatusEmail } from "./mail.service.js";
+import { sendOrderStatusEmail, sendComboRedemptionEmail } from "./mail.service.js";
 import esTranslations from "./es.json" with { type: 'json' };
 
 const TEST_KEY = "test-mail-encryption-passphrase";
@@ -19,6 +19,17 @@ const orderFixture = (overrides = {}) => ({
     address: "Calle 1",
     notes: "Sin hielo",
     ...overrides
+});
+
+const redemptionFixture = () => ({
+    voucher: {
+        code: "VALE-ABC123",
+        customerName: "Cliente Prueba",
+        totalUnits: 5,
+        usedUnits: 2
+    },
+    redemption: { redeemedAt: "2026-11-19T12:00:00.000Z" },
+    items: [{ name: "Agua Mineral", quantity: 2, remaining: 3 }]
 });
 
 const storeConfigFixture = (overrides = {}) => ({
@@ -91,7 +102,7 @@ describe("sendOrderStatusEmail", () => {
         expect(fakes.sendMail).toHaveBeenCalledTimes(1);
 
         const message = fakes.sendMail.mock.calls[0][0];
-        expect(message.from).toBe("store@example.com");
+        expect(message.from).toEqual({ name: "Mi Tienda", address: "store@example.com" });
         expect(message.to).toBe("client@example.com");
         expect(message.bcc).toBe("admin@example.com");
         expect(message.subject).toContain("PED-ABC123");
@@ -177,5 +188,106 @@ describe("sendOrderStatusEmail", () => {
 
         expect(fakes.createTransport).not.toHaveBeenCalled();
         expect(fakes.sendMail).not.toHaveBeenCalled();
+    });
+});
+
+describe("sendComboRedemptionEmail", () => {
+    it("sends one redemption receipt through the tenant SMTP settings", async () => {
+        const fakes = setup(storeConfigFixture());
+        const fixture = redemptionFixture();
+
+        const result = await sendComboRedemptionEmail({
+            getModel: fakes.getModel,
+            ...fixture,
+            to: "client@example.com",
+            lang: "es",
+            createTransport: fakes.createTransport
+        });
+
+        expect(result).toEqual({ sent: true });
+        expect(fakes.findOne).toHaveBeenCalledWith({ key: STORE_CONFIG_KEY });
+        expect(fakes.select).toHaveBeenCalledWith(
+            expect.stringContaining("+smtpPassEncrypted")
+        );
+        expect(fakes.createTransport).toHaveBeenCalledWith({
+            host: "smtp.gmail.com",
+            port: 465,
+            secure: true,
+            auth: { user: "store@example.com", pass: "smtp-password" }
+        });
+        expect(fakes.sendMail).toHaveBeenCalledTimes(1);
+
+        const message = fakes.sendMail.mock.calls[0][0];
+        expect(message.from).toEqual({ name: "Mi Tienda", address: "store@example.com" });
+        expect(message.to).toBe("client@example.com");
+        expect(message.bcc).toBe("admin@example.com");
+        expect(message.subject).toContain("VALE-ABC123");
+        expect(message.html).toContain("Agua Mineral");
+        expect(message.text).toContain("Agua Mineral");
+        expect(message.text).toContain("3 de 5 unidades");
+    });
+
+    it("skips when there is no recipient", async () => {
+        const fakes = setup(storeConfigFixture());
+
+        const result = await sendComboRedemptionEmail({
+            getModel: fakes.getModel,
+            ...redemptionFixture(),
+            to: undefined,
+            createTransport: fakes.createTransport
+        });
+
+        expect(result).toEqual({ sent: false, reason: "no_recipient" });
+        expect(fakes.createTransport).not.toHaveBeenCalled();
+        expect(fakes.sendMail).not.toHaveBeenCalled();
+    });
+
+    it("skips when the tenant SMTP settings are missing", async () => {
+        const fakes = setup(null);
+
+        const result = await sendComboRedemptionEmail({
+            getModel: fakes.getModel,
+            ...redemptionFixture(),
+            to: "client@example.com",
+            createTransport: fakes.createTransport
+        });
+
+        expect(result).toEqual({ sent: false, reason: "not_configured" });
+        expect(fakes.createTransport).not.toHaveBeenCalled();
+        expect(fakes.sendMail).not.toHaveBeenCalled();
+    });
+
+    it("propagates transport failures to the caller", async () => {
+        const fakes = setup(storeConfigFixture());
+        fakes.sendMail.mockRejectedValueOnce(new Error("SMTP unavailable"));
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+            await expect(sendComboRedemptionEmail({
+                getModel: fakes.getModel,
+                ...redemptionFixture(),
+                to: "client@example.com",
+                createTransport: fakes.createTransport
+            })).rejects.toThrow("SMTP unavailable");
+        } finally {
+            errorSpy.mockRestore();
+        }
+
+        expect(fakes.sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses the plain sender address when the store has no display name", async () => {
+        const fakes = setup(storeConfigFixture({ name: undefined }));
+
+        const result = await sendOrderStatusEmail({
+            getModel: fakes.getModel,
+            order: orderFixture(),
+            status: 1,
+            lang: "es",
+            createTransport: fakes.createTransport
+        });
+
+        expect(result).toEqual({ sent: true });
+        expect(fakes.sendMail.mock.calls[0][0].from).toBe("store@example.com");
     });
 });

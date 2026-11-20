@@ -65,5 +65,14 @@ export const enqueueOrderStatusMail = async ({
         ? await MailOutbox.create([entry], { session })
         : await MailOutbox.create([entry]);
 
+    console.info("[outbox] enqueued order-status mail", {
+        id: doc._id.toString(),
+        orderCode: entry.orderCode,
+        status,
+        to: entry.to,
+        bcc: entry.bcc || "(none)",
+        subject: entry.subject
+    });
+
     return { enqueued: true, id: doc._id };
 };

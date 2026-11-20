@@ -8,7 +8,7 @@ import { resolveFirebaseUser } from "../users/user.service.js";
 import { ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord, resolveSaleStockItems } from "../sales/sale.service.js";
 import { getRequestModelResolver } from "../tenants/requestModel.js";
-import { enqueueOrderStatusMail } from "../notifications/outbox.service.js";
+import { sendOrderStatusEmail } from "../notifications/mail.service.js";
 
 const COMBO_PRODUCT_TYPE = 3;
 const PUBLIC_PRODUCT_TYPES = [1, 2, COMBO_PRODUCT_TYPE];
@@ -498,14 +498,17 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       return res.status(409).json(new ApiResponse(409, {}, "error_order_invalid_transition"));
     }
 
-    // No transaction exists on the reject path, so the outbox row is written
-    // on its own. A failure here never changes the order response.
+    // No transaction exists on the reject path. A mail failure only logs and
+    // never changes the order response.
     try {
-      await enqueueOrderStatusMail({
+      const mailResult = await sendOrderStatusEmail({
         getModel, order: updated, status: 2, lang: getLang(req)
       });
+      console.info("[mail] rejection send result", {
+        orderCode: updated?.code, status: 2, ...mailResult
+      });
     } catch (error) {
-      console.error("[outbox] failed to enqueue rejection mail", error);
+      console.error("[mail] failed to send rejection email", error);
     }
 
     return res.status(200).json(new ApiResponse(200, toOrderDto(updated), "success_order_cancelled"));
@@ -514,8 +517,11 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
+  let updatedOrder;
+  let sale;
+
   try {
-    const updatedOrder = await Order.findOneAndUpdate(
+    updatedOrder = await Order.findOneAndUpdate(
       { _id: orderId, status: 0 },
       { $set: { status: 1 } },
       { new: true, session }
@@ -534,7 +540,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       subtotal: toNumber(item.subtotal)
     })), getModel);
 
-    const sale = await createSaleRecord({
+    sale = await createSaleRecord({
       payload: {
         customerName: order.customerName,
         customerPhone: order.customerPhone,
@@ -560,22 +566,8 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     updatedOrder.saleId = sale._id;
     await updatedOrder.save({ session });
 
-    // Enqueue inside the transaction so the mail row commits atomically with
-    // the order and sale. The failure is only logged: mail must never abort a
-    // confirmed order or roll back its writes.
-    try {
-      await enqueueOrderStatusMail({
-        getModel, session, order: updatedOrder, status: 1,
-        comboVouchers: sale?.comboVouchers, lang: getLang(req)
-      });
-    } catch (error) {
-      console.error("[outbox] failed to enqueue confirmation mail", error);
-    }
-
     await session.commitTransaction();
     session.endSession();
-
-    return res.status(200).json(new ApiResponse(200, toOrderDto(updatedOrder), "success_order_confirmed"));
   } catch (error) {
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
@@ -594,6 +586,23 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     // Falla interna: se loguea arriba, pero al cliente no se le filtran detalles.
     return res.status(500).json(new ApiResponse(500, {}, "error_internal_server_generic"));
   }
+
+  // The SMTP round-trip runs after commit, outside the transaction error path,
+  // so it can never roll back writes or change the HTTP status.
+  try {
+    const mailResult = await sendOrderStatusEmail({
+      getModel, order: updatedOrder, status: 1,
+      comboVouchers: sale?.comboVouchers, lang: getLang(req)
+    });
+    console.info("[mail] confirmation send result", {
+      orderCode: updatedOrder?.code, status: 1,
+      comboVouchers: sale?.comboVouchers?.length || 0, ...mailResult
+    });
+  } catch (error) {
+    console.error("[mail] failed to send confirmation email", error);
+  }
+
+  return res.status(200).json(new ApiResponse(200, toOrderDto(updatedOrder), "success_order_confirmed"));
 });
 
 export { createOrder, getMyOrders, getMyOrderById, getAllOrders, updateOrderStatus };

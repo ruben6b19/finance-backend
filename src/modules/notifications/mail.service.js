@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
 import { decrypt } from "../../utils/mailCrypto.js";
 import { buildOrderStatusMail } from "./orderMail.template.js";
+import { buildComboRedemptionMail } from "./redemptionMail.template.js";
 
 const defaultCreateTransport = (options) => nodemailer.createTransport(options);
 
@@ -44,8 +45,23 @@ export const sendRawMail = async ({
         auth: { user: config.smtpUser, pass: plainPassword }
     });
 
+    // Never log the password — only the account, recipient and subject.
+    console.info("[mail] sending via Gmail SMTP", {
+        smtpUser: config.smtpUser,
+        to,
+        bcc: config.adminBccEmail || "(none)",
+        subject
+    });
+
+    // Use Nodemailer's address object so the store name becomes the display
+    // name ("Digital Core" <sender@gmail.com>) and any quotes are escaped.
+    // Fall back to the plain address when the tenant has no name configured.
+    const from = config.name
+        ? { name: config.name, address: config.smtpUser }
+        : config.smtpUser;
+
     await transport.sendMail({
-        from: config.smtpUser,
+        from,
         to,
         bcc: config.adminBccEmail || undefined,
         subject,
@@ -53,6 +69,7 @@ export const sendRawMail = async ({
         text
     });
 
+    console.info("[mail] sendMail succeeded", { smtpUser: config.smtpUser, to });
     return { sent: true };
 };
 
@@ -60,9 +77,8 @@ export const sendRawMail = async ({
  * Sends the customer an email when an order is confirmed or rejected, using the
  * SMTP credentials of the tenant that owns the order.
  *
- * Kept for backward compatibility with callers that still render and send in
- * one step. The order flow now writes to the outbox instead; this function and
- * the outbox worker both go through sendRawMail so behaviour stays identical.
+ * The order flow sends directly through this function and sendRawMail; the
+ * dormant outbox worker uses the same delivery primitive as a manual fallback.
  */
 const sendOrderStatusEmail = async ({
     getModel,
@@ -97,4 +113,43 @@ const sendOrderStatusEmail = async ({
     });
 };
 
-export { sendOrderStatusEmail };
+/**
+ * Sends the combo voucher holder a redemption receipt through the tenant's
+ * Gmail SMTP settings. Recipient resolution belongs to the caller: the counter
+ * staff member is not necessarily the voucher owner.
+ */
+const sendComboRedemptionEmail = async ({
+    getModel,
+    voucher,
+    redemption,
+    items,
+    to,
+    lang,
+    createTransport = defaultCreateTransport
+}) => {
+    const StoreConfig = getModel("StoreConfig");
+
+    // smtpPassEncrypted has select: false, so the explicit "+field" is required.
+    const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
+        .select("name phone whatsapp smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
+        .lean();
+
+    const template = buildComboRedemptionMail({
+        voucher,
+        redemption,
+        items,
+        storeConfig: config || {},
+        lang
+    });
+
+    return sendRawMail({
+        config,
+        to,
+        subject: template.subject,
+        html: template.html,
+        text: template.text,
+        createTransport
+    });
+};
+
+export { sendOrderStatusEmail, sendComboRedemptionEmail };

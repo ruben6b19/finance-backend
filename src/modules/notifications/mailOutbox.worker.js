@@ -56,6 +56,12 @@ export const runMailOutboxSweep = async ({
 
                 perTarget.claimed += 1;
                 summary.claimed += 1;
+                console.info("[outbox] claimed entry", {
+                    id: entry._id.toString(),
+                    dbName,
+                    to: entry.to,
+                    attempts: entry.attempts || 0
+                });
 
                 try {
                     let result = null;
@@ -85,6 +91,9 @@ export const runMailOutboxSweep = async ({
                         );
                         perTarget.sent += 1;
                         summary.sent += 1;
+                        console.info("[outbox] mail sent", {
+                            id: entry._id.toString(), dbName, to: entry.to, bcc: entry.bcc || "(none)"
+                        });
                     } else if (result?.sent === false && TERMINAL_REASONS.has(result.reason)) {
                         await MailOutbox.updateOne(
                             { _id: entry._id, status: "processing" },
@@ -92,6 +101,9 @@ export const runMailOutboxSweep = async ({
                         );
                         perTarget.failed += 1;
                         summary.failed += 1;
+                        console.warn("[outbox] mail failed permanently", {
+                            id: entry._id.toString(), dbName, to: entry.to, reason: result.reason
+                        });
                     } else {
                         // Transport failure or any unclassified result: retry
                         // with backoff, or give up once the attempt budget is spent.
@@ -120,6 +132,10 @@ export const runMailOutboxSweep = async ({
                             perTarget.retried += 1;
                             summary.retried += 1;
                         }
+                        console.warn("[outbox] mail attempt failed", {
+                            id: entry._id.toString(), dbName, to: entry.to,
+                            attempts, exhausted, nextAttemptAt: patch.nextAttemptAt, lastError
+                        });
                     }
                 } catch (entryError) {
                     // Keep the claim for the stale-reset on the next sweep; one
