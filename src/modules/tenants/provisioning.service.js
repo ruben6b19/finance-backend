@@ -3,12 +3,14 @@ import { ROLES, STATUS } from "../../constants/roles.js";
 import { normalizeRoles } from "../../utils/roles.js";
 import { validateEmail, validateName } from "../../utils/regex.js";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
+import { STORE_SCHEDULE_KEY } from "../storeConfig/storeSchedule.model.js";
+import { DEFAULT_TIME_ZONE } from "../../utils/boliviaTime.js";
 import { isValidSlug, slugify } from "./store.service.js";
 
 /**
- * Provisions a store: the singleton StoreConfig and its first admin in the
- * store database, plus the central email -> database mapping and the central
- * slug -> database registry.
+ * Provisions a store: the singleton StoreConfig, its StoreSchedule and its
+ * first admin in the store database, plus the central email -> database mapping
+ * and the central slug -> database registry.
  *
  * Models and the Firebase adapter are injected so the flow is testable and so
  * the caller decides which database each model belongs to.
@@ -27,6 +29,7 @@ export async function provisionStore({
     TenantMapping,
     StoreModel,
     ensureFirebaseUser,
+    scheduleTimezone = "",
     dryRun = false
 }) {
     if (!dbName) {
@@ -49,12 +52,13 @@ export async function provisionStore({
     }
 
     const StoreConfig = getStoreModel("StoreConfig");
+    const StoreSchedule = getStoreModel("StoreSchedule");
     const User = getStoreModel("User");
 
     // Create the store collections before reading so the first run is
     // deterministic: a read never creates a database.
     if (!dryRun) {
-        await Promise.all([StoreConfig.init(), User.init()]);
+        await Promise.all([StoreConfig.init(), StoreSchedule.init(), User.init()]);
     }
 
     const existingStore = await StoreConfig.findOne({ key: STORE_CONFIG_KEY }).lean();
@@ -177,6 +181,36 @@ export async function provisionStore({
         { key: STORE_CONFIG_KEY },
         { $set: store },
         { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+    );
+
+    // 1b. The schedule owns the timezone now. Stores provisioned before this
+    // feature still have a legacy StoreConfig.timezone that Mongoose no longer
+    // maps, so it is read through the native collection. An existing schedule
+    // is never overwritten, and a failed read must not fail provisioning.
+    let initialTimeZone = DEFAULT_TIME_ZONE;
+    try {
+        const rawStore = await StoreConfig.collection.findOne(
+            { key: STORE_CONFIG_KEY },
+            { projection: { timezone: 1 } }
+        );
+        for (const candidate of [rawStore?.timezone, scheduleTimezone]) {
+            if (typeof candidate !== "string" || candidate.trim() === "") continue;
+            try {
+                new Intl.DateTimeFormat("en", { timeZone: candidate.trim() });
+                initialTimeZone = candidate.trim();
+                break;
+            } catch (error) {
+                // Ignore invalid legacy values and keep the next candidate.
+            }
+        }
+    } catch (error) {
+        console.warn("[schedule] could not read the legacy timezone:", error?.message);
+    }
+
+    await StoreSchedule.updateOne(
+        { key: STORE_SCHEDULE_KEY },
+        { $setOnInsert: { timezone: initialTimeZone } },
+        { upsert: true }
     );
 
     // 2. First admin in the store database.

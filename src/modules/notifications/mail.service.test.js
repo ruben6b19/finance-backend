@@ -45,14 +45,17 @@ const storeConfigFixture = (overrides = {}) => ({
 
 // Every test builds its own chainable fake; nothing here opens a DB connection
 // or reaches a real SMTP server.
-const setup = (config) => {
+const setup = (config, schedule = { timezone: "America/La_Paz" }) => {
     const lean = jest.fn().mockResolvedValue(config);
     const select = jest.fn().mockReturnValue({ lean });
     const findOne = jest.fn().mockReturnValue({ select });
-    const getModel = jest.fn().mockReturnValue({ findOne });
+    const getSingleton = jest.fn().mockResolvedValue(schedule);
+    const getModel = jest.fn((modelName) =>
+        modelName === "StoreSchedule" ? { getSingleton } : { findOne }
+    );
     const sendMail = jest.fn().mockResolvedValue({});
     const createTransport = jest.fn().mockReturnValue({ sendMail });
-    return { getModel, findOne, select, lean, sendMail, createTransport };
+    return { getModel, findOne, select, lean, getSingleton, sendMail, createTransport };
 };
 
 beforeAll(() => {
@@ -141,7 +144,7 @@ describe("sendOrderStatusEmail", () => {
     });
 
     it("renders customer timestamps in the tenant's configured time zone", async () => {
-        const fakes = setup(storeConfigFixture({ timezone: "America/Mexico_City" }));
+        const fakes = setup(storeConfigFixture(), { timezone: "America/Mexico_City" });
 
         await sendOrderStatusEmail({
             getModel: fakes.getModel,

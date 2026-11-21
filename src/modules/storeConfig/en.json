@@ -9,8 +9,8 @@
     "success_store_delivery_options_saved": "Delivery options saved.",
     "error_store_config_invalid_coordinates": "Coordinates must be valid numbers (latitude -90 to 90, longitude -180 to 180) or null.",
     "success_store_coordinates_saved": "Store coordinates saved.",
-    "error_store_config_invalid_timezone": "Timezone must be a valid IANA name (for example America/La_Paz).",
-    "success_store_timezone_saved": "Store timezone saved.",
+    "error_store_schedule_invalid": "Store schedule configuration is invalid.",
+    "success_store_schedule_saved": "Store schedule saved.",
     "error_store_config_invalid_general_data": "General store data is invalid. The name is required and every field must be a string.",
     "success_store_general_data_saved": "General store data saved.",
 

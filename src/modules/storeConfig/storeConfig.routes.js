@@ -1,5 +1,15 @@
 import { Router } from "express";
-import { getPublicStoreConfig, getStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateGeneralStoreConfig, updateMailConfig } from "./storeConfig.controller.js";
+import {
+    getPublicStoreConfig,
+    getStoreConfig,
+    updateDeliveryOptions,
+    updateCoordinates,
+    updateGeneralStoreConfig,
+    updateMailConfig,
+    getStoreSchedule,
+    updateStoreSchedule,
+    updateStoreScheduleMode
+} from "./storeConfig.controller.js";
 import { verifyFirebaseToken } from "../../middlewares/auth.middleware.js";
 import { requireStore } from "../../middlewares/resolveStore.middleware.js";
 
@@ -24,9 +34,10 @@ router.route("/delivery-options").put(updateDeliveryOptions);
 // the controller so the route itself only enforces authentication.
 router.route("/coordinates").put(updateCoordinates);
 
-// The IANA time zone drives business windows and customer mail timestamps.
-// It is tenant-scoped and admin-only; the role guard lives in the controller.
-router.route("/timezone").put(updateTimezone);
+// Store schedule is tenant-scoped and admin-only; the role guard lives in the
+// controller, so the route itself only enforces authentication.
+router.route("/schedule").get(getStoreSchedule).put(updateStoreSchedule);
+router.route("/schedule/mode").put(updateStoreScheduleMode);
 
 // General store data is tenant-scoped and admin-only; the role guard lives in
 // the controller so the route itself only enforces authentication.

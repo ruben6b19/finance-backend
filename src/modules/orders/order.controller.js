@@ -7,7 +7,8 @@ import { roleAtLeast } from "../../utils/roles.js";
 import { resolveFirebaseUser } from "../users/user.service.js";
 import { ORDER_STATUS, DELIVERY_TYPES } from "./order.model.js";
 import { createSaleRecord, resolveSaleStockItems } from "../sales/sale.service.js";
-import { getRequestModelResolver } from "../tenants/requestModel.js";
+import { getRequestModel, getRequestModelResolver } from "../tenants/requestModel.js";
+import { evaluateStoreOpenState } from "../../utils/storeSchedule.js";
 import { sendOrderStatusEmail } from "../notifications/mail.service.js";
 
 const COMBO_PRODUCT_TYPE = 3;
@@ -72,6 +73,19 @@ const createOrder = asyncHandler(async (req, res) => {
   // The customer profile lives in the same tenant database as the order, so
   // the reference never crosses databases.
   const User = getModel("User");
+
+  // Order gating fails open: a store provisioned before schedules existed has
+  // no document yet and must keep accepting orders. Raw key pattern, EN:
+  // "The store is not accepting orders right now."
+  let storeSchedule = null;
+  try {
+    storeSchedule = await getRequestModel(req, "StoreSchedule").getSingleton();
+  } catch (error) {
+    console.warn("[schedule] could not read the store schedule:", error?.message);
+  }
+  if (!evaluateStoreOpenState(storeSchedule).isOpen) {
+    return res.status(403).json(new ApiResponse(403, {}, "error_store_closed"));
+  }
 
   const resolved = await resolveFirebaseUser({
     firebaseUid: req.user?.firebaseUid,

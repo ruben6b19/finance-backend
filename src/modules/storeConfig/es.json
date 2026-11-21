@@ -9,8 +9,8 @@
     "success_store_delivery_options_saved": "Opciones de entrega guardadas.",
     "error_store_config_invalid_coordinates": "Las coordenadas deben ser números válidos (latitud -90 a 90, longitud -180 a 180) o nulo.",
     "success_store_coordinates_saved": "Coordenadas de la tienda guardadas.",
-    "error_store_config_invalid_timezone": "La zona horaria debe ser un nombre IANA válido (por ejemplo America/La_Paz).",
-    "success_store_timezone_saved": "Zona horaria de la tienda guardada.",
+    "error_store_schedule_invalid": "La configuración del horario es inválida.",
+    "success_store_schedule_saved": "Horario de la tienda guardado.",
     "error_store_config_invalid_general_data": "Los datos generales de la tienda son inválidos. El nombre es obligatorio y todos los campos deben ser texto.",
     "success_store_general_data_saved": "Datos generales de la tienda guardados.",
 

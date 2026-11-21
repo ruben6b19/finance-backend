@@ -37,6 +37,7 @@
  *   --currency <s>         Currency label (or STORE_CURRENCY, default "Bs.")
  *   --ticket-footer <s>    Ticket footer text (or STORE_TICKET_FOOTER, default "¡Gracias por su preferencia!")
  *   --logo-url <s>         Logo URL (or STORE_LOGO_URL, default "")
+ *   --timezone <s>         Initial IANA timezone for StoreSchedule (or STORE_TIMEZONE, default America/La_Paz)
  *   --admin-email <s>      First admin email (or STORE_ADMIN_EMAIL; required only when no admin exists)
  *   --admin-password <s>   Firebase password, min 6 chars (or STORE_ADMIN_PASSWORD; required only when no admin exists)
  *   --admin-name <s>       First admin display name (or STORE_ADMIN_NAME, default "Administrador")
@@ -159,6 +160,7 @@ async function main() {
     const currency = String(readOption(args, "currency", "STORE_CURRENCY", "Bs."));
     const ticketFooter = String(readOption(args, "ticket-footer", "STORE_TICKET_FOOTER", "¡Gracias por su preferencia!"));
     const logoUrl = String(readOption(args, "logo-url", "STORE_LOGO_URL", ""));
+    const timezone = String(readOption(args, "timezone", "STORE_TIMEZONE", ""));
     const adminEmail = String(readOption(args, "admin-email", "STORE_ADMIN_EMAIL", "")).toLowerCase();
     const adminPassword = String(readOption(args, "admin-password", "STORE_ADMIN_PASSWORD", ""));
     const adminName = String(readOption(args, "admin-name", "STORE_ADMIN_NAME", "Administrador"));
@@ -223,6 +225,7 @@ async function main() {
             TenantMapping,
             StoreModel: Store,
             ensureFirebaseUser: firebaseAdapter,
+            scheduleTimezone: timezone,
             dryRun
         });
 

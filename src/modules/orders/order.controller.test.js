@@ -10,6 +10,7 @@ import { TransactionCategory } from "../transactionCategories/transactionCategor
 import { User } from "../users/user.model.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import { DB_NAME } from "../../constants.js";
+import { SCHEDULE_MODE } from "../../utils/storeScheduleModes.js";
 
 // The mail service is mocked so order tests never touch SMTP. The controller
 // must be imported only after this registration.
@@ -118,7 +119,8 @@ describe("order tenant routing", () => {
             tenantModel("ComboComponent").init(),
             tenantModel("ComboPurchase").init(),
             tenantModel("ComboRedemption").init(),
-            tenantModel("User").init()
+            tenantModel("User").init(),
+            tenantModel("StoreSchedule").init()
         ]);
     }, 60000);
 
@@ -156,6 +158,7 @@ describe("order tenant routing", () => {
             tenantModel("ComboPurchase").deleteMany({}),
             tenantModel("ComboRedemption").deleteMany({}),
             tenantModel("User").deleteMany({}),
+            tenantModel("StoreSchedule").deleteMany({}),
             // The central database is shared by every test in this file, so
             // clear it too: the leak assertions are only meaningful if it starts
             // empty.
@@ -216,6 +219,72 @@ describe("order tenant routing", () => {
         expect(tenantUser.fullName).toBe("Cliente Nuevo");
         expect(await User.countDocuments()).toBe(0);
         expect(payload.data.total).toBe(20);
+    });
+
+    const seedSchedule = (overrides = {}) => tenantModel("StoreSchedule").create({
+        key: "store-schedule",
+        timezone: "America/La_Paz",
+        autoScheduleEnabled: false,
+        openTime: "08:00",
+        closeTime: "21:00",
+        closedDays: [0],
+        scheduleMode: SCHEDULE_MODE.AUTO,
+        forceOpenUntil: "",
+        ...overrides
+    });
+
+    itDb("rejects orders with 403 when the store is closed", async () => {
+        await seedSchedule({ scheduleMode: SCHEDULE_MODE.FORCE_CLOSED });
+
+        const { statusCode, payload } = await call(
+            createOrder,
+            clientRequest({ body: orderBody() })
+        );
+
+        expect(statusCode).toBe(403);
+        expect(payload.message).toBe("error_store_closed");
+        expect(await tenantModel("Order").countDocuments()).toBe(0);
+    });
+
+    itDb("allows orders when the store is open", async () => {
+        await seedSchedule();
+
+        const { statusCode } = await call(
+            createOrder,
+            clientRequest({ body: orderBody() })
+        );
+
+        expect(statusCode).toBe(201);
+        expect(await tenantModel("Order").countDocuments()).toBe(1);
+    });
+
+    itDb("allows orders when the tenant has no schedule", async () => {
+        const { statusCode } = await call(
+            createOrder,
+            clientRequest({ body: orderBody() })
+        );
+
+        expect(statusCode).toBe(201);
+        expect(await tenantModel("Order").countDocuments()).toBe(1);
+    });
+
+    itDb("rejects SCHEDULE_MODE.FORCE_CLOSED even inside the business window", async () => {
+        await seedSchedule({
+            scheduleMode: SCHEDULE_MODE.FORCE_CLOSED,
+            autoScheduleEnabled: true,
+            openTime: "00:00",
+            closeTime: "23:59",
+            closedDays: []
+        });
+
+        const { statusCode, payload } = await call(
+            createOrder,
+            clientRequest({ body: orderBody() })
+        );
+
+        expect(statusCode).toBe(403);
+        expect(payload.message).toBe("error_store_closed");
+        expect(await tenantModel("Order").countDocuments()).toBe(0);
     });
 
     itDb("confirms the order into a tenant sale and transaction", async () => {

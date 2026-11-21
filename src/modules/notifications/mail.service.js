@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { STORE_CONFIG_KEY } from "../storeConfig/storeConfig.model.js";
 import { decrypt } from "../../utils/mailCrypto.js";
-import { DEFAULT_TIME_ZONE } from "../../utils/boliviaTime.js";
+import { getStoreTimeZone } from "../../utils/storeTimeZone.js";
 import { buildOrderStatusMail } from "./orderMail.template.js";
 import { buildComboRedemptionMail } from "./redemptionMail.template.js";
 
@@ -90,10 +90,11 @@ const sendOrderStatusEmail = async ({
     createTransport = defaultCreateTransport
 }) => {
     const StoreConfig = getModel("StoreConfig");
+    const timeZone = await getStoreTimeZone(getModel);
 
     // smtpPassEncrypted has select: false, so the explicit "+field" is required.
     const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
-        .select("name phone whatsapp timezone smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
+        .select("name phone whatsapp smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
         .lean();
 
     const template = buildOrderStatusMail({
@@ -102,7 +103,7 @@ const sendOrderStatusEmail = async ({
         storeConfig: config || {},
         comboVouchers,
         lang,
-        timeZone: config?.timezone ?? DEFAULT_TIME_ZONE
+        timeZone
     });
 
     return sendRawMail({
@@ -130,10 +131,11 @@ const sendComboRedemptionEmail = async ({
     createTransport = defaultCreateTransport
 }) => {
     const StoreConfig = getModel("StoreConfig");
+    const timeZone = await getStoreTimeZone(getModel);
 
     // smtpPassEncrypted has select: false, so the explicit "+field" is required.
     const config = await StoreConfig.findOne({ key: STORE_CONFIG_KEY })
-        .select("name phone whatsapp timezone smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
+        .select("name phone whatsapp smtpUser smtpPassEncrypted adminBccEmail +smtpPassEncrypted")
         .lean();
 
     const template = buildComboRedemptionMail({
@@ -142,7 +144,7 @@ const sendComboRedemptionEmail = async ({
         items,
         storeConfig: config || {},
         lang,
-        timeZone: config?.timezone ?? DEFAULT_TIME_ZONE
+        timeZone
     });
 
     return sendRawMail({

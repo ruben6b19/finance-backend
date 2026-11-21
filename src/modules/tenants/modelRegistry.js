@@ -9,6 +9,7 @@ import { ProductCategory } from "../productCategories/productCategory.model.js";
 import { Reservation } from "../reservations/reservation.model.js";
 import { Unit } from "../units/unit.model.js";
 import { StoreConfig } from "../storeConfig/storeConfig.model.js";
+import { StoreSchedule } from "../storeConfig/storeSchedule.model.js";
 import { Product } from "../products/product.model.js";
 import { ComboRedemption } from "../combos/comboRedemption.model.js";
 import { ComboPurchase } from "../combos/comboPurchase.model.js";
@@ -30,6 +31,7 @@ const MODELS = [
     Reservation,
     Unit,
     StoreConfig,
+    StoreSchedule,
     Product,
     ComboRedemption,
     ComboPurchase,

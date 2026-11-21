@@ -8,6 +8,7 @@ import { TenantMapping } from "./tenantMapping.model.js";
 import { Store } from "./store.model.js";
 import { getTenantModel, resetTenantConnections } from "./tenantConnection.js";
 import { provisionStore } from "./provisioning.service.js";
+import { SCHEDULE_MODE } from "../../utils/storeScheduleModes.js";
 
 const TENANT_DB = "tenant_store";
 const OTHER_DB = "tenant_other";
@@ -40,6 +41,7 @@ const provision = ({
     store = storePayload,
     admin = adminPayload,
     firebase,
+    scheduleTimezone = "",
     dryRun = false
 } = {}) =>
     provisionStore({
@@ -52,6 +54,7 @@ const provision = ({
         TenantMapping,
         StoreModel: Store,
         ensureFirebaseUser: firebase,
+        scheduleTimezone,
         dryRun
     });
 
@@ -83,6 +86,7 @@ beforeEach(async () => {
     for (const dbName of [TENANT_DB, OTHER_DB]) {
         await getTenantModel(dbName, "User").deleteMany({});
         await getTenantModel(dbName, "StoreConfig").deleteMany({});
+        await getTenantModel(dbName, "StoreSchedule").deleteMany({});
     }
 });
 
@@ -134,6 +138,55 @@ describe("provisionStore", () => {
             name: "Tienda Norte",
             status: STATUS.ACTIVE
         });
+    });
+
+    it("creates a StoreSchedule singleton with the default timezone", async () => {
+        await provision({ firebase: buildFirebase() });
+
+        const schedule = await getTenantModel(TENANT_DB, "StoreSchedule")
+            .findOne({ key: "store-schedule" })
+            .lean();
+        expect(schedule.timezone).toBe("America/La_Paz");
+        expect(schedule.scheduleMode).toBe(SCHEDULE_MODE.AUTO);
+        expect(schedule.closedDays).toEqual([0]);
+    });
+
+    it("migrates a legacy StoreConfig timezone into a new StoreSchedule", async () => {
+        await getTenantModel(TENANT_DB, "StoreConfig").collection.insertOne({
+            key: STORE_CONFIG_KEY,
+            name: "Legacy Store",
+            timezone: "America/Mexico_City"
+        });
+
+        await provision({ firebase: buildFirebase() });
+
+        const schedule = await getTenantModel(TENANT_DB, "StoreSchedule").getSingleton().lean();
+        expect(schedule.timezone).toBe("America/Mexico_City");
+        // Legacy data stays in MongoDB; only the mapping was removed.
+        const raw = await getTenantModel(TENANT_DB, "StoreConfig").collection.findOne({ key: STORE_CONFIG_KEY });
+        expect(raw.timezone).toBe("America/Mexico_City");
+    });
+
+    it("never overwrites an existing StoreSchedule", async () => {
+        await getTenantModel(TENANT_DB, "StoreSchedule").create({
+            key: "store-schedule",
+            timezone: "Europe/Madrid",
+            scheduleMode: SCHEDULE_MODE.FORCE_CLOSED
+        });
+
+        await provision({ firebase: buildFirebase(), scheduleTimezone: "America/Mexico_City" });
+
+        const schedule = await getTenantModel(TENANT_DB, "StoreSchedule").getSingleton().lean();
+        expect(schedule.timezone).toBe("Europe/Madrid");
+        expect(schedule.scheduleMode).toBe(SCHEDULE_MODE.FORCE_CLOSED);
+        expect(await getTenantModel(TENANT_DB, "StoreSchedule").countDocuments()).toBe(1);
+    });
+
+    it("uses the requested timezone when there is no legacy value", async () => {
+        await provision({ firebase: buildFirebase(), scheduleTimezone: "Europe/Madrid" });
+
+        const schedule = await getTenantModel(TENANT_DB, "StoreSchedule").getSingleton().lean();
+        expect(schedule.timezone).toBe("Europe/Madrid");
     });
 
     it("uses an explicit slug when one is provided", async () => {

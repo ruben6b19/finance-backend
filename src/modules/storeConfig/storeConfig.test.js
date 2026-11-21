@@ -3,10 +3,22 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 
 import { DB_NAME } from "../../constants.js";
 import { StoreConfig, STORE_CONFIG_KEY } from "./storeConfig.model.js";
-import { getPublicStoreConfig, getStoreConfig, updateDeliveryOptions, updateCoordinates, updateTimezone, updateGeneralStoreConfig, updateMailConfig } from "./storeConfig.controller.js";
+import { STORE_SCHEDULE_KEY } from "./storeSchedule.model.js";
+import {
+    getPublicStoreConfig,
+    getStoreConfig,
+    updateDeliveryOptions,
+    updateCoordinates,
+    updateGeneralStoreConfig,
+    updateMailConfig,
+    getStoreSchedule,
+    updateStoreSchedule,
+    updateStoreScheduleMode
+} from "./storeConfig.controller.js";
 import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnection.js";
 import { ROLES } from "../../constants/roles.js";
 import { decrypt } from "../../utils/mailCrypto.js";
+import { SCHEDULE_MODE } from "../../utils/storeScheduleModes.js";
 import esTranslations from "./es.json" with { type: "json" };
 
 const TENANT_DB = "tenant_store_config";
@@ -115,6 +127,7 @@ describe("storeConfig module", () => {
         await mongoose.connect(mongoServer.getUri(), { dbName: DB_NAME });
         await StoreConfig.init();
         await getTenantModel(TENANT_DB, "StoreConfig").init();
+        await getTenantModel(TENANT_DB, "StoreSchedule").init();
     }, 20000);
 
     afterAll(async () => {
@@ -131,6 +144,7 @@ describe("storeConfig module", () => {
     beforeEach(async () => {
         await StoreConfig.deleteMany({});
         await getTenantModel(TENANT_DB, "StoreConfig").deleteMany({});
+        await getTenantModel(TENANT_DB, "StoreSchedule").deleteMany({});
     });
 
     it("applies the default currency and ticket footer", async () => {
@@ -138,8 +152,9 @@ describe("storeConfig module", () => {
 
         expect(config.currency).toBe("Bs.");
         expect(config.ticketFooter).toBe("¡Gracias por su preferencia!");
-        expect(config.timezone).toBe("America/La_Paz");
         expect(config.key).toBe(STORE_CONFIG_KEY);
+        expect(config.timezone).toBeUndefined();
+        expect(StoreConfig.schema.path("timezone")).toBeUndefined();
     });
 
     it("returns the single row and rejects a second document with a duplicate key", async () => {
@@ -192,7 +207,6 @@ describe("storeConfig module", () => {
         expect(payload.data.dineInEnabled).toBe(true);
         expect(payload.data.pickupEnabled).toBe(false);
         expect(payload.data.deliveryEnabled).toBe(true);
-        expect(payload.data.timezone).toBe("America/La_Paz");
         expect(payload.data._id).toBeUndefined();
         expect(payload.data.key).toBeUndefined();
         expect(payload.data.createdAt).toBeUndefined();
@@ -211,7 +225,6 @@ describe("storeConfig module", () => {
             "pickupEnabled",
             "razonSocial",
             "ticketFooter",
-            "timezone",
             "whatsapp"
         ]);
     });
@@ -228,27 +241,6 @@ describe("storeConfig module", () => {
         expect(statusCode).toBe(200);
         expect(payload.data.latitude).toBe(-17.7833);
         expect(payload.data.longitude).toBe(-63.1821);
-    });
-
-    it("includes the configured timezone on the authenticated route", async () => {
-        await StoreConfig.create({
-            name: "Mi Tienda",
-            timezone: "America/Mexico_City"
-        });
-
-        const { statusCode, payload } = await call(getStoreConfig, requestFor(DB_NAME));
-
-        expect(statusCode).toBe(200);
-        expect(payload.data.timezone).toBe("America/Mexico_City");
-    });
-
-    it("returns the default timezone for legacy authenticated configs", async () => {
-        await StoreConfig.collection.insertOne({ key: STORE_CONFIG_KEY, name: "Legacy Store" });
-
-        const { statusCode, payload } = await call(getStoreConfig, requestFor(DB_NAME));
-
-        expect(statusCode).toBe(200);
-        expect(payload.data.timezone).toBe("America/La_Paz");
     });
 
     it("returns 404 with a translated error when the collection is empty", async () => {
@@ -294,6 +286,8 @@ describe("storeConfig module", () => {
             latitude: null,
             longitude: null,
             timezone: "America/La_Paz",
+            isOpen: true,
+            scheduleMode: SCHEDULE_MODE.AUTO,
             dineInEnabled: true,
             pickupEnabled: false,
             deliveryEnabled: true
@@ -306,10 +300,14 @@ describe("storeConfig module", () => {
             name: "Pollería Digital Core",
             latitude: -17.7833,
             longitude: -63.1821,
-            timezone: "America/Mexico_City",
             dineInEnabled: true,
             pickupEnabled: false,
             deliveryEnabled: true
+        });
+        await getTenantModel(TENANT_DB, "StoreSchedule").create({
+            key: STORE_SCHEDULE_KEY,
+            timezone: "America/Mexico_City",
+            autoScheduleEnabled: false
         });
 
         const { statusCode, payload } = await call(getPublicStoreConfig, requestFor(TENANT_DB));
@@ -320,6 +318,8 @@ describe("storeConfig module", () => {
             latitude: -17.7833,
             longitude: -63.1821,
             timezone: "America/Mexico_City",
+            isOpen: true,
+            scheduleMode: SCHEDULE_MODE.AUTO,
             dineInEnabled: true,
             pickupEnabled: false,
             deliveryEnabled: true
@@ -340,6 +340,8 @@ describe("storeConfig module", () => {
             latitude: null,
             longitude: null,
             timezone: "America/La_Paz",
+            isOpen: true,
+            scheduleMode: SCHEDULE_MODE.AUTO,
             dineInEnabled: true,
             pickupEnabled: true,
             deliveryEnabled: true
@@ -682,82 +684,6 @@ describe("storeConfig module", () => {
         expect(payload.message).toBe(esTranslations.error_store_config_not_found);
     });
 
-    it("rejects an invalid IANA timezone at write time", async () => {
-        await expect(StoreConfig.create({ name: "Mi Tienda", timezone: "UTC-4" }))
-            .rejects.toThrow();
-
-        expect(await StoreConfig.countDocuments({})).toBe(0);
-    });
-
-    it("lets an ADMIN save the store timezone", async () => {
-        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
-        await tenantModel.create({ name: "Tienda del Tenant" });
-
-        const { statusCode, payload } = await call(
-            updateTimezone,
-            requestFor(TENANT_DB, ROLES.ADMIN, { timezone: "America/Mexico_City" })
-        );
-
-        expect(statusCode).toBe(200);
-        expect(payload.success).toBe(true);
-        expect(payload.message).toBe(esTranslations.success_store_timezone_saved);
-        expect(payload.data).toEqual({ timezone: "America/Mexico_City" });
-
-        const stored = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
-        expect(stored.timezone).toBe("America/Mexico_City");
-    });
-
-    it.each([
-        ["CLIENT", ROLES.CLIENT],
-        ["SELLER", ROLES.SELLER]
-    ])("returns 403 when a %s tries to save the store timezone", async (_, role) => {
-        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
-        await tenantModel.create({ name: "Tienda del Tenant" });
-
-        const { statusCode, payload } = await call(
-            updateTimezone,
-            requestFor(TENANT_DB, role, { timezone: "America/Mexico_City" })
-        );
-
-        expect(statusCode).toBe(403);
-        expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
-
-        const stored = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
-        expect(stored.timezone).toBe("America/La_Paz");
-    });
-
-    it.each([
-        ["a numeric offset", { timezone: "-04:00" }],
-        ["an unknown IANA name", { timezone: "Mars/Olympus" }],
-        ["an empty string", { timezone: "   " }],
-        ["a missing value", {}],
-        ["a non-string value", { timezone: 123 }]
-    ])("returns 400 for an invalid timezone when given %s", async (_, body) => {
-        const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
-        await tenantModel.create({ name: "Tienda del Tenant" });
-
-        const { statusCode, payload } = await call(
-            updateTimezone,
-            requestFor(TENANT_DB, ROLES.ADMIN, body)
-        );
-
-        expect(statusCode).toBe(400);
-        expect(payload.message).toBe(esTranslations.error_store_config_invalid_timezone);
-
-        const stored = await tenantModel.findOne({ key: STORE_CONFIG_KEY }).lean();
-        expect(stored.timezone).toBe("America/La_Paz");
-    });
-
-    it("returns 404 when saving the timezone without a store config", async () => {
-        const { statusCode, payload } = await call(
-            updateTimezone,
-            requestFor(TENANT_DB, ROLES.ADMIN, { timezone: "America/Mexico_City" })
-        );
-
-        expect(statusCode).toBe(404);
-        expect(payload.message).toBe(esTranslations.error_store_config_not_found);
-    });
-
     it("lets an ADMIN save all nine general store fields trimmed", async () => {
         const tenantModel = getTenantModel(TENANT_DB, "StoreConfig");
         await tenantModel.create(generalBaseline);
@@ -890,5 +816,278 @@ describe("storeConfig module", () => {
 
         expect(statusCode).toBe(404);
         expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+    });
+
+    describe("store schedule", () => {
+        const scheduleModel = () => getTenantModel(TENANT_DB, "StoreSchedule");
+
+        const seedSchedule = (overrides = {}) => scheduleModel().create({
+            key: STORE_SCHEDULE_KEY,
+            timezone: "America/La_Paz",
+            autoScheduleEnabled: true,
+            openTime: "08:00",
+            closeTime: "21:00",
+            closedDays: [0],
+            scheduleMode: SCHEDULE_MODE.AUTO,
+            forceOpenUntil: "",
+            ...overrides
+        });
+
+        const validScheduleBody = {
+            timezone: "America/Mexico_City",
+            autoScheduleEnabled: false,
+            openTime: "09:30",
+            closeTime: "18:45",
+            closedDays: [0, 6],
+            scheduleMode: SCHEDULE_MODE.AUTO,
+            forceOpenUntil: ""
+        };
+
+        const expectedProjection = (overrides = {}) => ({
+            timezone: "America/La_Paz",
+            autoScheduleEnabled: true,
+            openTime: "08:00",
+            closeTime: "21:00",
+            closedDays: [0],
+            scheduleMode: SCHEDULE_MODE.AUTO,
+            forceOpenUntil: "",
+            isOpen: true,
+            effectiveMode: SCHEDULE_MODE.AUTO,
+            ...overrides
+        });
+
+        it("lets an ADMIN read the full schedule with its effective state", async () => {
+            await seedSchedule({ scheduleMode: SCHEDULE_MODE.FORCE_CLOSED });
+
+            const { statusCode, payload } = await call(
+                getStoreSchedule,
+                requestFor(TENANT_DB, ROLES.ADMIN)
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.success).toBe(true);
+            expect(payload.data).toEqual(expectedProjection({
+                scheduleMode: SCHEDULE_MODE.FORCE_CLOSED,
+                effectiveMode: SCHEDULE_MODE.FORCE_CLOSED,
+                isOpen: false
+            }));
+        });
+
+        it.each([
+            ["CLIENT", ROLES.CLIENT],
+            ["SELLER", ROLES.SELLER]
+        ])("returns 403 when a %s reads the schedule", async (_, role) => {
+            await seedSchedule();
+
+            const { statusCode, payload } = await call(
+                getStoreSchedule,
+                requestFor(TENANT_DB, role)
+            );
+
+            expect(statusCode).toBe(403);
+            expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
+        });
+
+        it("returns 404 when reading a schedule that does not exist", async () => {
+            const { statusCode, payload } = await call(
+                getStoreSchedule,
+                requestFor(TENANT_DB, ROLES.ADMIN)
+            );
+
+            expect(statusCode).toBe(404);
+            expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+        });
+
+        it("lets an ADMIN replace the whole schedule", async () => {
+            await seedSchedule();
+
+            const { statusCode, payload } = await call(
+                updateStoreSchedule,
+                requestFor(TENANT_DB, ROLES.ADMIN, validScheduleBody)
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.message).toBe(esTranslations.success_store_schedule_saved);
+            expect(payload.data).toEqual(expectedProjection({
+                ...validScheduleBody,
+                isOpen: true,
+                effectiveMode: SCHEDULE_MODE.AUTO
+            }));
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored).toMatchObject(validScheduleBody);
+            expect(typeof stored.scheduleMode).toBe("number");
+        });
+
+        it.each([
+            ["an invalid timezone", { timezone: "Mars/Olympus" }],
+            ["a malformed open time", { openTime: "24:00" }],
+            ["open at or after close", { openTime: "21:00", closeTime: "08:00" }],
+            ["equal open and close times", { openTime: "09:30", closeTime: "09:30" }],
+            ["an out-of-range closed day", { closedDays: [7] }],
+            ["a non-integer closed day", { closedDays: ["1"] }],
+            ["an unknown mode", { scheduleMode: "MAYBE" }],
+            ["a legacy string mode", { scheduleMode: "FORCE_CLOSED" }],
+            ["a fractional numeric mode", { scheduleMode: 1.5 }],
+            ["a negative numeric mode", { scheduleMode: -1 }],
+            ["an out-of-range numeric mode", { scheduleMode: 3 }],
+            ["a null mode", { scheduleMode: null }],
+            ["a malformed forced-open expiry", { forceOpenUntil: "9:00" }],
+            ["a non-boolean autoScheduleEnabled", { autoScheduleEnabled: "true" }],
+            ["a missing field", { closeTime: undefined }]
+        ])("returns 400 when the schedule payload has %s", async (_, override) => {
+            await seedSchedule();
+            const body = { ...validScheduleBody, ...override };
+            if (override.closeTime === undefined) delete body.closeTime;
+
+            const { statusCode, payload } = await call(
+                updateStoreSchedule,
+                requestFor(TENANT_DB, ROLES.ADMIN, body)
+            );
+
+            expect(statusCode).toBe(400);
+            expect(payload.message).toBe(esTranslations.error_store_schedule_invalid);
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored.timezone).toBe("America/La_Paz");
+            expect(stored.openTime).toBe("08:00");
+        });
+
+        it.each([
+            ["CLIENT", ROLES.CLIENT],
+            ["SELLER", ROLES.SELLER]
+        ])("returns 403 when a %s replaces the schedule", async (_, role) => {
+            await seedSchedule();
+
+            const { statusCode, payload } = await call(
+                updateStoreSchedule,
+                requestFor(TENANT_DB, role, validScheduleBody)
+            );
+
+            expect(statusCode).toBe(403);
+            expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored.timezone).toBe("America/La_Paz");
+        });
+
+        it("returns 404 when replacing a schedule that does not exist", async () => {
+            const { statusCode, payload } = await call(
+                updateStoreSchedule,
+                requestFor(TENANT_DB, ROLES.ADMIN, validScheduleBody)
+            );
+
+            expect(statusCode).toBe(404);
+            expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+        });
+
+        it("pauses orders instantly with SCHEDULE_MODE.FORCE_CLOSED", async () => {
+            await seedSchedule({ autoScheduleEnabled: false });
+
+            const { statusCode, payload } = await call(
+                updateStoreScheduleMode,
+                requestFor(TENANT_DB, ROLES.ADMIN, { scheduleMode: SCHEDULE_MODE.FORCE_CLOSED })
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.message).toBe(esTranslations.success_store_schedule_saved);
+            expect(payload.data.isOpen).toBe(false);
+            expect(payload.data.scheduleMode).toBe(SCHEDULE_MODE.FORCE_CLOSED);
+            expect(payload.data.effectiveMode).toBe(SCHEDULE_MODE.FORCE_CLOSED);
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored.scheduleMode).toBe(SCHEDULE_MODE.FORCE_CLOSED);
+            expect(typeof stored.scheduleMode).toBe("number");
+        });
+
+        it("resumes orders instantly with SCHEDULE_MODE.FORCE_OPEN and an optional local expiry", async () => {
+            await seedSchedule({ scheduleMode: SCHEDULE_MODE.FORCE_CLOSED });
+
+            const { statusCode, payload } = await call(
+                updateStoreScheduleMode,
+                requestFor(TENANT_DB, ROLES.ADMIN, {
+                    scheduleMode: SCHEDULE_MODE.FORCE_OPEN,
+                    forceOpenUntil: "23:59"
+                })
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.data).toMatchObject({
+                isOpen: true,
+                scheduleMode: SCHEDULE_MODE.FORCE_OPEN,
+                effectiveMode: SCHEDULE_MODE.FORCE_OPEN,
+                forceOpenUntil: "23:59"
+            });
+        });
+
+        it.each([
+            ["an unknown mode", { scheduleMode: "MAYBE" }],
+            ["a legacy string mode", { scheduleMode: "FORCE_CLOSED" }],
+            ["a fractional numeric mode", { scheduleMode: 1.5 }],
+            ["a negative numeric mode", { scheduleMode: -1 }],
+            ["an out-of-range numeric mode", { scheduleMode: 3 }],
+            ["a null mode", { scheduleMode: null }],
+            ["a missing mode", {}],
+            ["a malformed expiry", { scheduleMode: SCHEDULE_MODE.FORCE_OPEN, forceOpenUntil: "7:30" }],
+            ["a non-string expiry", { scheduleMode: SCHEDULE_MODE.FORCE_OPEN, forceOpenUntil: 30 }]
+        ])("returns 400 when the mode payload has %s", async (_, body) => {
+            await seedSchedule();
+
+            const { statusCode, payload } = await call(
+                updateStoreScheduleMode,
+                requestFor(TENANT_DB, ROLES.ADMIN, body)
+            );
+
+            expect(statusCode).toBe(400);
+            expect(payload.message).toBe(esTranslations.error_store_schedule_invalid);
+        });
+
+        it.each([
+            ["CLIENT", ROLES.CLIENT],
+            ["SELLER", ROLES.SELLER]
+        ])("returns 403 when a %s changes the mode", async (_, role) => {
+            await seedSchedule();
+
+            const { statusCode, payload } = await call(
+                updateStoreScheduleMode,
+                requestFor(TENANT_DB, role, { scheduleMode: SCHEDULE_MODE.FORCE_CLOSED })
+            );
+
+            expect(statusCode).toBe(403);
+            expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored.scheduleMode).toBe(SCHEDULE_MODE.AUTO);
+        });
+
+        it("returns 404 when changing the mode of a schedule that does not exist", async () => {
+            const { statusCode, payload } = await call(
+                updateStoreScheduleMode,
+                requestFor(TENANT_DB, ROLES.ADMIN, { scheduleMode: SCHEDULE_MODE.FORCE_CLOSED })
+            );
+
+            expect(statusCode).toBe(404);
+            expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+        });
+
+        it("publishes the effective state and the schedule timezone on the public route", async () => {
+            await getTenantModel(TENANT_DB, "StoreConfig").create({ name: "Pollería Digital Core" });
+            await seedSchedule({
+                timezone: "America/Mexico_City",
+                scheduleMode: SCHEDULE_MODE.FORCE_CLOSED
+            });
+
+            const { statusCode, payload } = await call(
+                getPublicStoreConfig,
+                requestFor(TENANT_DB)
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.data).toMatchObject({
+                timezone: "America/Mexico_City",
+                isOpen: false,
+                scheduleMode: SCHEDULE_MODE.FORCE_CLOSED
+            });
+        });
     });
 });
