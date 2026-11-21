@@ -28,6 +28,26 @@ const isValidTimeZone = (value) => {
     }
 };
 
+/**
+ * Best-effort read of the legacy StoreConfig.timezone for stores provisioned
+ * before the schedule owned the timezone. Falls back to the default zone when
+ * the raw value is missing, unreadable or not a valid IANA time zone.
+ */
+const resolveLegacyStoreTimeZone = async (req) => {
+    try {
+        const StoreConfig = getRequestModel(req, "StoreConfig");
+        const raw = await StoreConfig.collection.findOne({ key: STORE_CONFIG_KEY }, { projection: { timezone: 1 } });
+        for (const candidate of [raw?.timezone]) {
+            if (typeof candidate === "string" && candidate.trim() !== "" && isValidTimeZone(candidate.trim())) {
+                return candidate.trim();
+            }
+        }
+    } catch (error) {
+        console.warn("[schedule] could not read the legacy timezone:", error?.message);
+    }
+    return DEFAULT_TIME_ZONE;
+};
+
 // Reading the schedule is best effort everywhere: a store provisioned before
 // this feature has no document yet and must keep working (fail-open).
 const readStoreSchedule = async (req) => {
@@ -384,9 +404,26 @@ const getStoreSchedule = asyncHandler(async (req, res) => {
             return translateErrorResponse(res, lang, "error_store_config_admin_only", 403, translations);
         }
 
-        const schedule = await readStoreSchedule(req);
+        // Self-healing admin read: stores provisioned before this feature have
+        // no schedule document, so create it on the tenant-scoped connection
+        // instead of answering 404. The filter stays { key } on that model.
+        const StoreSchedule = getRequestModel(req, "StoreSchedule");
+        let schedule = await StoreSchedule.findOne({ key: STORE_SCHEDULE_KEY }).lean();
         if (!schedule) {
-            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+            schedule = await StoreSchedule.findOneAndUpdate(
+                { key: STORE_SCHEDULE_KEY },
+                {
+                    $setOnInsert: {
+                        key: STORE_SCHEDULE_KEY,
+                        timezone: await resolveLegacyStoreTimeZone(req)
+                    }
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+            ).lean();
+        }
+
+        if (!schedule) {
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
         }
 
         return res.status(200).json(
@@ -451,11 +488,11 @@ const updateStoreSchedule = asyncHandler(async (req, res) => {
                     forceOpenUntil: trimmedUntil
                 }
             },
-            { new: true, runValidators: true }
+            { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
         );
 
         if (!schedule) {
-            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
         }
 
         return res.status(200).json(
@@ -500,15 +537,23 @@ const updateStoreScheduleMode = asyncHandler(async (req, res) => {
         const patch = { scheduleMode };
         if (hasUntil) patch.forceOpenUntil = trimmedUntil;
 
+        // Upsert keeps the toggle self-healing for stores without a schedule;
+        // a new document inherits the legacy timezone and schema defaults.
         const StoreSchedule = getRequestModel(req, "StoreSchedule");
         const schedule = await StoreSchedule.findOneAndUpdate(
             { key: STORE_SCHEDULE_KEY },
-            { $set: patch },
-            { new: true, runValidators: true }
+            {
+                $set: patch,
+                $setOnInsert: {
+                    key: STORE_SCHEDULE_KEY,
+                    timezone: await resolveLegacyStoreTimeZone(req)
+                }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
         );
 
         if (!schedule) {
-            return translateErrorResponse(res, lang, "error_store_config_not_found", 404, translations);
+            return translateErrorResponse(res, lang, "error_internal_server_generic", 500, translations);
         }
 
         return res.status(200).json(

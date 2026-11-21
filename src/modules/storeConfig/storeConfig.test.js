@@ -19,9 +19,11 @@ import { getTenantModel, resetTenantConnections } from "../tenants/tenantConnect
 import { ROLES } from "../../constants/roles.js";
 import { decrypt } from "../../utils/mailCrypto.js";
 import { SCHEDULE_MODE } from "../../utils/storeScheduleModes.js";
+import { evaluateStoreOpenState } from "../../utils/storeSchedule.js";
 import esTranslations from "./es.json" with { type: "json" };
 
 const TENANT_DB = "tenant_store_config";
+const OTHER_TENANT_DB = "tenant_store_config_other";
 
 // asyncHandler does not return the handler promise, so tests must wait for the
 // response (or reject) signal instead of awaiting the controller call itself.
@@ -128,6 +130,8 @@ describe("storeConfig module", () => {
         await StoreConfig.init();
         await getTenantModel(TENANT_DB, "StoreConfig").init();
         await getTenantModel(TENANT_DB, "StoreSchedule").init();
+        await getTenantModel(OTHER_TENANT_DB, "StoreConfig").init();
+        await getTenantModel(OTHER_TENANT_DB, "StoreSchedule").init();
     }, 20000);
 
     afterAll(async () => {
@@ -136,6 +140,7 @@ describe("storeConfig module", () => {
         const client = mongoose.connection.getClient();
         await mongoose.connection.dropDatabase();
         await client.db(TENANT_DB).dropDatabase();
+        await client.db(OTHER_TENANT_DB).dropDatabase();
 
         await mongoose.connection.close();
         await mongoServer.stop();
@@ -145,6 +150,8 @@ describe("storeConfig module", () => {
         await StoreConfig.deleteMany({});
         await getTenantModel(TENANT_DB, "StoreConfig").deleteMany({});
         await getTenantModel(TENANT_DB, "StoreSchedule").deleteMany({});
+        await getTenantModel(OTHER_TENANT_DB, "StoreConfig").deleteMany({});
+        await getTenantModel(OTHER_TENANT_DB, "StoreSchedule").deleteMany({});
     });
 
     it("applies the default currency and ticket footer", async () => {
@@ -888,14 +895,75 @@ describe("storeConfig module", () => {
             expect(payload.message).toBe(esTranslations.error_store_config_admin_only);
         });
 
-        it("returns 404 when reading a schedule that does not exist", async () => {
+        it("creates a missing schedule on read and returns the defaults", async () => {
+            expect(await scheduleModel().countDocuments({})).toBe(0);
+
             const { statusCode, payload } = await call(
                 getStoreSchedule,
                 requestFor(TENANT_DB, ROLES.ADMIN)
             );
 
-            expect(statusCode).toBe(404);
-            expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+            expect(statusCode).toBe(200);
+            expect(payload.success).toBe(true);
+            expect(payload.data).toMatchObject({
+                timezone: "America/La_Paz",
+                autoScheduleEnabled: true,
+                openTime: "08:00",
+                closeTime: "21:00",
+                closedDays: [0],
+                scheduleMode: SCHEDULE_MODE.AUTO,
+                forceOpenUntil: "",
+                effectiveMode: SCHEDULE_MODE.AUTO
+            });
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored).toMatchObject({
+                key: STORE_SCHEDULE_KEY,
+                timezone: "America/La_Paz",
+                autoScheduleEnabled: true,
+                openTime: "08:00",
+                closeTime: "21:00",
+                closedDays: [0],
+                scheduleMode: SCHEDULE_MODE.AUTO,
+                forceOpenUntil: ""
+            });
+            expect(payload.data.isOpen).toBe(evaluateStoreOpenState(stored).isOpen);
+        });
+
+        it("inherits the legacy StoreConfig timezone when creating a missing schedule", async () => {
+            await getTenantModel(TENANT_DB, "StoreConfig").collection.updateOne(
+                { key: STORE_CONFIG_KEY },
+                { $set: { timezone: "America/Argentina/Buenos_Aires" } },
+                { upsert: true }
+            );
+
+            const { statusCode, payload } = await call(
+                getStoreSchedule,
+                requestFor(TENANT_DB, ROLES.ADMIN)
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.data.timezone).toBe("America/Argentina/Buenos_Aires");
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored.timezone).toBe("America/Argentina/Buenos_Aires");
+        });
+
+        it("keeps schedules isolated between tenants when self-healing", async () => {
+            await seedSchedule({ timezone: "America/Mexico_City", openTime: "07:00" });
+            const before = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            const otherScheduleModel = () => getTenantModel(OTHER_TENANT_DB, "StoreSchedule");
+            expect(await otherScheduleModel().countDocuments({})).toBe(0);
+
+            const { statusCode } = await call(
+                getStoreSchedule,
+                requestFor(OTHER_TENANT_DB, ROLES.ADMIN)
+            );
+
+            expect(statusCode).toBe(200);
+            expect(await otherScheduleModel().countDocuments({})).toBe(1);
+            const otherStored = await otherScheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(otherStored.timezone).toBe("America/La_Paz");
+            expect(await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean()).toEqual(before);
         });
 
         it("lets an ADMIN replace the whole schedule", async () => {
@@ -971,14 +1039,22 @@ describe("storeConfig module", () => {
             expect(stored.timezone).toBe("America/La_Paz");
         });
 
-        it("returns 404 when replacing a schedule that does not exist", async () => {
+        it("creates a missing schedule when replacing it", async () => {
+            expect(await scheduleModel().countDocuments({})).toBe(0);
+
             const { statusCode, payload } = await call(
                 updateStoreSchedule,
                 requestFor(TENANT_DB, ROLES.ADMIN, validScheduleBody)
             );
 
-            expect(statusCode).toBe(404);
-            expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+            expect(statusCode).toBe(200);
+            expect(payload.message).toBe(esTranslations.success_store_schedule_saved);
+            expect(payload.data).toMatchObject(validScheduleBody);
+            expect(payload.data.effectiveMode).toBe(SCHEDULE_MODE.AUTO);
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored).toMatchObject(validScheduleBody);
+            expect(await scheduleModel().countDocuments({})).toBe(1);
         });
 
         it("pauses orders instantly with SCHEDULE_MODE.FORCE_CLOSED", async () => {
@@ -1060,14 +1136,57 @@ describe("storeConfig module", () => {
             expect(stored.scheduleMode).toBe(SCHEDULE_MODE.AUTO);
         });
 
-        it("returns 404 when changing the mode of a schedule that does not exist", async () => {
+        it("creates a missing schedule with defaults when changing its mode", async () => {
+            expect(await scheduleModel().countDocuments({})).toBe(0);
+
             const { statusCode, payload } = await call(
                 updateStoreScheduleMode,
                 requestFor(TENANT_DB, ROLES.ADMIN, { scheduleMode: SCHEDULE_MODE.FORCE_CLOSED })
             );
 
-            expect(statusCode).toBe(404);
-            expect(payload.message).toBe(esTranslations.error_store_config_not_found);
+            expect(statusCode).toBe(200);
+            expect(payload.message).toBe(esTranslations.success_store_schedule_saved);
+            expect(payload.data).toMatchObject({
+                timezone: "America/La_Paz",
+                autoScheduleEnabled: true,
+                openTime: "08:00",
+                closeTime: "21:00",
+                closedDays: [0],
+                scheduleMode: SCHEDULE_MODE.FORCE_CLOSED,
+                forceOpenUntil: "",
+                effectiveMode: SCHEDULE_MODE.FORCE_CLOSED
+            });
+
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored).toMatchObject({
+                key: STORE_SCHEDULE_KEY,
+                timezone: "America/La_Paz",
+                autoScheduleEnabled: true,
+                openTime: "08:00",
+                closeTime: "21:00",
+                closedDays: [0],
+                scheduleMode: SCHEDULE_MODE.FORCE_CLOSED,
+                forceOpenUntil: ""
+            });
+            expect(await scheduleModel().countDocuments({})).toBe(1);
+        });
+
+        it("inherits the legacy StoreConfig timezone when a mode change creates the schedule", async () => {
+            await getTenantModel(TENANT_DB, "StoreConfig").collection.updateOne(
+                { key: STORE_CONFIG_KEY },
+                { $set: { timezone: "America/Argentina/Buenos_Aires" } },
+                { upsert: true }
+            );
+
+            const { statusCode, payload } = await call(
+                updateStoreScheduleMode,
+                requestFor(TENANT_DB, ROLES.ADMIN, { scheduleMode: SCHEDULE_MODE.FORCE_OPEN })
+            );
+
+            expect(statusCode).toBe(200);
+            expect(payload.data.timezone).toBe("America/Argentina/Buenos_Aires");
+            const stored = await scheduleModel().findOne({ key: STORE_SCHEDULE_KEY }).lean();
+            expect(stored.timezone).toBe("America/Argentina/Buenos_Aires");
         });
 
         it("publishes the effective state and the schedule timezone on the public route", async () => {
